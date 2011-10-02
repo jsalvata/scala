@@ -229,7 +229,6 @@ trait Definitions extends reflect.api.StandardDefinitions {
     lazy val StringModule               = StringClass.linkedClassOfClass
     lazy val ClassClass                 = getClass(sn.Class)
       def Class_getMethod               = getMember(ClassClass, nme.getMethod_)
-    lazy val DynamicClass               = getClass("scala.Dynamic")
 
     // fundamental modules
     lazy val SysPackage = getPackageObject("scala.sys")
@@ -277,6 +276,9 @@ trait Definitions extends reflect.api.StandardDefinitions {
       // !!! This is not used anywhere (it was checked in that way.)
       // def delayedInitArgVal = EmptyPackageClass.newValue(NoPosition, nme.delayedInitArg)
       //   .setInfo(UnitClass.tpe)
+    lazy val DynamicClass             = getClass("scala.Dynamic")
+    lazy val DynamicMethodNameClass   = getClass("scala.Dynamic.MethodName")
+    lazy val DynamicCallingNameMethod = getMember(getModule("scala.Dynamic"), "callingName")
 
     lazy val TypeConstraintClass   = getClass("scala.annotation.TypeConstraint")
     lazy val SingletonClass        = newClass(ScalaPackageClass, tpnme.Singleton, anyparam) setFlag (ABSTRACT | TRAIT | FINAL)

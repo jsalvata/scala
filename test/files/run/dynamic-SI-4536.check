@@ -1,4 +1,4 @@
-DynamicClass.bar(List())
+DynamicClass.bar()
 DynamicClass.bar(List())
 DynamicClass.bar(List())
 Regular method

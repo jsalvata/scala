@@ -1,4 +1,4 @@
 class DynamicClass extends Dynamic {
-  def applyDynamic(m: String)() = ()
+  def applyDynamic()(implicit m: Dynamic.MethodName) = ()
   nonExistingMethod()
 }

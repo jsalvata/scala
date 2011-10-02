@@ -1,18 +1,18 @@
 object dynamicObject extends Dynamic {
-  def applyDynamic(m: String)() = ()
+  def applyDynamic()(implicit m: Dynamic.MethodName) = ()
   this.foo()
 }
 class dynamicClass extends Dynamic {
-  def applyDynamic(m: String)() = ()
+  def applyDynamic()(implicit m: Dynamic.MethodName) = ()
   this.bar
   dynamicObject.bar()
 }
 abstract class dynamicAbstractClass extends Dynamic {
-  def applyDynamic(m: String)(args: Any*): Int
+  def applyDynamic(args: Any*)(implicit m: Dynamic.MethodName): Int
   this.pili(1, new dynamicClass, "hello");
 }
 trait dynamicTrait extends Dynamic {
-  def applyDynamic(m: String)(args: Any*) = 1
+  def applyDynamic(args: Any*)(implicit m: Dynamic.MethodName) = 1
   def two = 2
   this.mili(1,2,3)
   two

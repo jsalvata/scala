@@ -86,11 +86,12 @@ trait Typers extends Modes with Adaptations {
         tp.isError || pt.isError ||
         context0.implicitsEnabled && // this condition prevents chains of views
         inferView(EmptyTree, tp, pt, false) != EmptyTree
-      }}
+      }
+    }
 
     /** Find implicit arguments and pass them to given tree.
      */
-    def applyImplicitArgs(fun: Tree): Tree = fun.tpe match {
+    def applyImplicitArgs(fun: Tree, original: Tree): Tree = fun.tpe match {
       case MethodType(params, _) =>
         val argResultsBuff = new ListBuffer[SearchResult]()
         val argBuff = new ListBuffer[Tree]()
@@ -108,6 +109,13 @@ trait Typers extends Modes with Adaptations {
                   else "parameter "+paramName+": ")+paramTp  
           }
 
+        def methodName(callingMethodName: Name) = {
+          if (callingMethodName == nme.applyDynamic)
+            throw new AssertionError("Can't find calling method name at "+fun.pos)
+          Apply(Select(New(DynamicMethodNameClass), nme.CONSTRUCTOR),
+            List(Literal(Constant(callingMethodName.decode))))
+        }
+
         // DEPMETTODO: instantiate type vars that depend on earlier implicit args (see adapt (4.1))
         //
         // apply the substitutions (undet type param -> type) that were determined
@@ -121,7 +129,18 @@ trait Typers extends Modes with Adaptations {
           argResultsBuff += res
 
           if (res != SearchFailure) {
-            argBuff += mkArg(res.tree, param.name)
+            val arg=
+              original match {
+                case Apply(Select(qual,name),_) if isScalaDynamic(qual) &&
+                    res.tree.symbol == DynamicCallingNameMethod =>
+                  methodName(name)
+                case Select(qual,name) if isScalaDynamic(qual) &&
+                    res.tree.symbol == DynamicCallingNameMethod =>
+                  methodName(name)
+                case _ =>
+                  res.tree
+              }
+            argBuff += mkArg(arg, param.name)
           } else {
             mkArg = mkNamedArg // don't pass the default argument (if any) here, but start emitting named arguments for the following args
             if (!param.hasDefault)
@@ -735,7 +754,7 @@ trait Typers extends Modes with Adaptations {
 
         val typer1 = constrTyperIf(treeInfo.isSelfOrSuperConstrCall(tree))
         if (original != EmptyTree && pt != WildcardType)
-          typer1.silent(tpr => tpr.typed(tpr.applyImplicitArgs(tree), mode, pt)) match {
+          typer1.silent(tpr => tpr.typed(tpr.applyImplicitArgs(tree, original), mode, pt)) match {
             case result: Tree => result
             case ex: TypeError =>
               debuglog("fallback on implicits: " + tree + "/" + resetAllAttrs(original))
@@ -744,7 +763,7 @@ trait Typers extends Modes with Adaptations {
               if (tree1.isEmpty) tree1 else adapt(tree1, mode, pt, EmptyTree)
           }
         else
-          typer1.typed(typer1.applyImplicitArgs(tree), mode, pt)
+          typer1.typed(typer1.applyImplicitArgs(tree, original), mode, pt)
       }
       
       def instantiateToMethodType(mt: MethodType): Tree = {
@@ -770,7 +789,19 @@ trait Typers extends Modes with Adaptations {
           } else
             typed(tree0, mode, pt)
         } else if (!meth.isConstructor && mt.params.isEmpty) { // (4.3)
-          adapt(typed(Apply(tree, List()) setPos tree.pos), mode, pt, original)
+          // If this call is an applyDynamic (for scala.Dynamic), we need to undo the
+          // rewrite before proceeding -- otherwise applyImplicitArgs won't be able to find
+          // the original calling name.
+          val tree1 = original match {
+            case Select(qual,methodName)
+            if isScalaDynamic(qual) &&
+               meth.name == nme.applyDynamic &&
+               methodName != nme.applyDynamic =>
+              Select(qual, methodName)
+            case _ =>
+              tree
+          }
+          adapt(typed(Apply(tree1, List()) setPos tree.pos), mode, pt, original)
         } else if (context.implicitsEnabled) {
           errorTree(tree, "missing arguments for " + meth + meth.locationString +
             (if (meth.isConstructor) ""
@@ -1006,6 +1037,7 @@ trait Typers extends Modes with Adaptations {
           }
       }
     }
+
 
     def instantiate(tree: Tree, mode: Int, pt: Type): Tree = {
       inferExprInstance(tree, context.extractUndetparams(), pt)
@@ -3092,6 +3124,12 @@ trait Typers extends Modes with Adaptations {
         println(s)
     }
 
+    def isScalaDynamic(qual: Tree) = {
+      settings.Xexperimental.value &&
+        qual.tpe != null &&
+        (qual.tpe.widen.typeSymbol isNonBottomSubClass DynamicClass)
+    }
+
     protected def typed1(tree: Tree, mode: Int, pt: Type): Tree = {
       def isPatternMode = inPatternMode(mode)
       
@@ -3657,26 +3695,15 @@ trait Typers extends Modes with Adaptations {
             else adaptToMemberWithArgs(tree, qual, name, mode)
           if (qual1 ne qual) return typed(treeCopy.Select(tree, qual1, name), mode, pt)
         }
-        
-        def applyDynamicInvocation: Option[Tree] = {
-          if (settings.Xexperimental.value && (qual.tpe.widen.typeSymbol isNonBottomSubClass DynamicClass)) {
-            if (name == nme.applyDynamic) {
-              // Prevents bug SI-4536
-              dynamicCallNotPossibleError(tree.pos, qual, name)
-            }
-            else {
-              var dynInvoke = Apply(Select(qual, nme.applyDynamic), List(Literal(Constant(name.decode))))
 
-              context.tree match {
-                case Apply(tree1, args) if tree1 eq tree =>
-                  ;
-                case _ =>
-                  dynInvoke = Apply(dynInvoke, List())
-              }
-              return Some(typed1(util.trace("dynatype: ")(atPos(tree.pos)(dynInvoke)), mode, pt))
-            }
+        def applyDynamicRewrite(): Tree = {
+          if (name == nme.applyDynamic) {
+            // Prevents bug SI-4536
+            dynamicCallNotPossibleError(tree.pos, qual, name)
+            tree
           }
-          None
+          else
+            typed1(util.trace("dynatype: ")(Select(qual, nme.applyDynamic)), mode, pt)
         }
 
         if (!reallyExists(sym)) {
@@ -3687,9 +3714,8 @@ trait Typers extends Modes with Adaptations {
 
           // try to expand according to Dynamic rules.
 
-          applyDynamicInvocation match {
-            case Some(invocation) => return invocation
-            case None =>
+          if (isScalaDynamic(qual)) {
+            return applyDynamicRewrite()
           }
 
           if (settings.debug.value) {
@@ -3755,10 +3781,10 @@ trait Typers extends Modes with Adaptations {
                 try adaptToMemberWithArgs(tree, qual, name, mode)
                 catch { case _: TypeError => qual }
               if (qual1 ne qual) typed(Select(qual1, name) setPos tree.pos, mode, pt)
-              else applyDynamicInvocation match {
-                case Some(invocation) => return invocation
-                case None => accErr.emit()
+              else if (isScalaDynamic(qual)) {
+                return applyDynamicRewrite()
               }
+              else accErr.emit()
             case _ =>
               result
           }

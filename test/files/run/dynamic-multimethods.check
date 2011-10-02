@@ -1,0 +1,10 @@
+Int: anInt(1)
+Boolean: aBoolean(false)
+Nothing: aNothing()
+Nothing: anotherNothing()
+Really nothing: reallyNothing
+Int: 1
+Boolean: false
+Nothing: ()
+Nothing: ()
+Really nothing

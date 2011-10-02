@@ -1,5 +1,5 @@
 class DynamicClass extends SuperClass with Dynamic {
-  def applyDynamic(m: String)()= "Dynamic call: "+m
+  def applyDynamic()(implicit m: Dynamic.MethodName)= "Dynamic call: "+m
 }
 
 class SuperClass {
