@@ -130,16 +130,20 @@ trait Typers extends Modes with Adaptations {
 
           if (res != SearchFailure) {
             val arg=
-              original match {
-                case Apply(Select(qual,name),_) if isScalaDynamic(qual) &&
-                    res.tree.symbol == DynamicCallingNameMethod =>
-                  methodName(name)
-                case Select(qual,name) if isScalaDynamic(qual) &&
-                    res.tree.symbol == DynamicCallingNameMethod =>
-                  methodName(name)
-                case _ =>
-                  res.tree
+              if (settings.Xexperimental.value && res.tree.symbol == DynamicCallingNameMethod) {
+                original match {
+                  case Apply(Select(qual,name),_) =>
+                    methodName(name)
+                  case Select(qual,name) =>
+                    methodName(name)
+                  case _ =>
+                    context.error(fun.pos, "Implicit method scala.Dynamic.callingName should " +
+                      "only be used as a parameter calls on types implementing scala.Dynamic.")
+                    res.tree
+                }
               }
+              else
+                res.tree
             argBuff += mkArg(arg, param.name)
           } else {
             mkArg = mkNamedArg // don't pass the default argument (if any) here, but start emitting named arguments for the following args
