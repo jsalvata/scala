@@ -54,8 +54,8 @@ trait MarkupParsers {
     
     type PositionType = Position
     type InputType    = CharArrayReader
-    type ElementType  = Tree
-    type AttributesType = mutable.Map[String, Tree]
+    type ElementType  = Tree => Tree
+    type AttributesType = mutable.Map[String, Tree => Tree]
     type NamespaceType = Any  // namespaces ignored
 
     def mkAttributes(name: String, other: NamespaceType): AttributesType = xAttributes
@@ -117,7 +117,7 @@ trait MarkupParsers {
      *                      | `{` scalablock `}`
      */
     def xAttributes = {
-      val aMap = mutable.HashMap[String, Tree]()
+      val aMap = mutable.HashMap[String, Tree => Tree]()
 
       while (isNameStart(ch)) {
         val start = curOffset
@@ -125,14 +125,14 @@ trait MarkupParsers {
         xEQ
         val delim = ch
         val mid = curOffset
-        val value: Tree = ch match {
+        val value: Tree => Tree = ch match {
           case '"' | '\'' =>
             val tmp = xAttributeValue(ch_returning_nextch)
             
             try handle.parseAttribute(r2p(start, mid, curOffset), tmp)
             catch {
               case e: RuntimeException => 
-                errorAndResult("error parsing attribute value", parser.errorTermTree)
+                errorAndResult("error parsing attribute value", (_:Tree) => parser.errorTermTree)
             }
           
           case '{'  =>
@@ -141,7 +141,7 @@ trait MarkupParsers {
           case SU =>
             throw TruncatedXMLControl
           case _ =>
-            errorAndResult("' or \" delimited attribute value or '{' scala-expr '}' expected", Literal(Constant("<syntax-error>")))
+            errorAndResult("' or \" delimited attribute value or '{' scala-expr '}' expected", (_: Tree) => Literal(Constant("<syntax-error>")))
         }
         // well-formedness constraint: unique attribute names
         if (aMap contains key)
@@ -321,7 +321,7 @@ trait MarkupParsers {
       }
       finally parser.in resume Tokens.XMLSTART
       
-      parser.errorTermTree
+      (_: Tree) => parser.errorTermTree
     }
       
     /** Use a lookahead parser to run speculative body, and return the first char afterward. */
@@ -337,7 +337,7 @@ trait MarkupParsers {
     /** xLiteral = element { element }
      *  @return Scala representation of this xml literal
      */
-    def xLiteral: ElementType = xLiteralCommon(
+    def xLiteral: Tree = xLiteralCommon(
       () => {
         input = parser.in
         handle.isPattern = false
@@ -363,12 +363,12 @@ trait MarkupParsers {
         }
       },
       msg => parser.incompleteInputError(msg)
-    )
+    )(null)
 
     /** @see xmlPattern. resynchronizes after successful parse 
      *  @return this xml pattern
      */
-    def xLiteralPattern: ElementType = xLiteralCommon(
+    def xLiteralPattern: Tree = xLiteralCommon(
       () => {
         input = parser.in
         saving[Boolean, ElementType](handle.isPattern, handle.isPattern = _) {
@@ -379,7 +379,7 @@ trait MarkupParsers {
         }
       },
       msg => parser.syntaxError(curOffset, msg)
-    )
+    )(null)
 
     def escapeToScala[A](op: => A, kind: String) = {
       xEmbeddedBlock = false
@@ -393,11 +393,14 @@ trait MarkupParsers {
       res
     }
 
-    def xEmbeddedExpr: ElementType = escapeToScala(parser.block(), "block")
+    def xEmbeddedExpr: ElementType = {
+      val block= escapeToScala(parser.block(), "block")
+      (_: Tree) => block
+    }
 
     /** xScalaPatterns  ::= patterns
      */
-    def xScalaPatterns: List[ElementType] = escapeToScala(parser.seqPatterns(), "pattern")
+    def xScalaPatterns: List[ElementType] = escapeToScala(parser.seqPatterns(), "pattern").map((pat: Tree) => (_: Tree) => pat)
 
     def reportSyntaxError(pos: Int, str: String) = parser.syntaxError(pos, str)
     def reportSyntaxError(str: String) {
