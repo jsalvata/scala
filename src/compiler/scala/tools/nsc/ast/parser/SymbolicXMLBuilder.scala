@@ -14,12 +14,6 @@ import scala.tools.util.StringOps.splitWhere
 
 /** This class builds instance of `Tree` that represent XML.
  *
- *  Note from martin: This needs to have its position info reworked. I don't
- *  understand exactly what's done here. To make validation pass, I set many
- *  positions to be transparent. Not sure this is a good idea for navigating
- *  XML trees in the IDE but it's the best I can do right now. If someone
- *  who understands this part better wants to give it a shot, please do!
- * 
  *  @author  Burak Emir
  *  @version 1.0
  */
@@ -120,24 +114,22 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
       (x: Tree) => New(_scala_xml_Elem, List(List(pre, label, attrs, scope) ::: args(x)))
     }
 
-    givePos(pos) compose { if (isPattern) pat else nonpat }
+    atPos[Tree](pos) _ compose { if (isPattern) pat else nonpat }
   }
-
-  final def givePos(pos: Position) = atPos[Tree](pos) _
   
   final def entityRef(pos: Position, n: String) =
     (_: Tree) => atPos(pos)( New(_scala_xml_EntityRef, LL(const(n))) )
 
   // create scala.xml.Text here <: scala.xml.Node
   final def text(pos: Position, txt: String): Tree => Tree = {
-    givePos(pos) compose (if (isPattern) makeTextPat((_:Tree) => const(txt))
+    atPos[Tree](pos) _ compose (if (isPattern) makeTextPat((_:Tree) => const(txt))
     else makeText1(const(txt)))
   }
 
   def makeTextPat(txt: Tree => Tree)        = (x: Tree) => Apply(_scala_xml__Text, List(txt(x)))
   def makeText1(txt: Tree)                  = (_: Tree) => New(_scala_xml_Text, LL(txt))
   def comment(pos: Position, text: String)  = (_: Tree) => atPos(pos)( Comment(const(text)) )
-  def charData(pos: Position, txt: String)  = givePos(pos) compose makeText1(const(txt))
+  def charData(pos: Position, txt: String)  = atPos[Tree](pos) _ compose makeText1(const(txt))
   
   def procInstr(pos: Position, target: String, txt: String) =
     (_: Tree) => atPos(pos)( ProcInstr(const(target), const(txt)) )
@@ -233,7 +225,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
       case (None, x)    => (null, x)
     }
 
-    def mkAttributeTree(pre: String, key: String, value: Tree => Tree) = givePos(pos.makeTransparent) compose {
+    def mkAttributeTree(pre: String, key: String, value: Tree => Tree) = atPos[Tree](pos) _ compose {
       // XXX this is where we'd like to put Select(value, nme.toString_) for #1787
       // after we resolve the Some(foo) situation.
       val baseArgs = List((_: Tree) => const(key), value, (_: Tree) => Ident(_md))
@@ -261,7 +253,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val metadataDef  = ValDef(Modifiers(MUTABLE), _md, _scala_xml_MetaData, _scala_xml_Null)
     val makeSymbolicAttrs = if (!attributes.isEmpty) Ident(_md) else _scala_xml_Null
 
-    val (attrResult, nsResult): Pair[Tree => List[Tree], Tree => List[Tree]] =
+    val (attrResult, nsResult) =
       (attributes.isEmpty, namespaces.isEmpty) match {
         case (true ,  true)   => ((_: Tree) => Nil, (_: Tree) => Nil)
         case (true , false)   => ((_: Tree) => scopeDef :: Nil, (x: Tree) => tmpScopeDef :: namespaces.map(_(x)))
@@ -270,7 +262,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
       }
 
     val body = mkXML(
-      pos.makeTransparent,
+      pos,
       false,
       const(pre),
       const(newlabel),
@@ -279,6 +271,6 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
       args
     )
 
-    (x: Tree) => atPos(pos.makeTransparent)( Block(nsResult(x), Block(attrResult(x), body(x))) )
+    (x: Tree) => atPos(pos)( Block(nsResult(x), Block(attrResult(x), body(x))) )
   }
 }
