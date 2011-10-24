@@ -42,7 +42,6 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _Null: NameType     = "Null"
     val __Elem: NameType    = "Elem"
     val __Text: NameType    = "Text"
-    val _buf: NameType      = "$buf"
     val _md: NameType       = "$md"
     val _plus: NameType     = "$amp$plus"
     val _scope: NameType    = "$scope"
@@ -62,7 +61,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   import xmltypes.{_Comment, _Elem, _EntityRef, _Group, _MetaData, _NamespaceBinding, _NodeBuffer, 
     _PrefixedAttribute, _ProcInstr, _Text, _Unparsed, _UnprefixedAttribute}
   
-  import xmlterms.{_Null, __Elem, __Text, _buf, _md, _plus, _scope, _tmpscope, _xml}
+  import xmlterms.{_Null, __Elem, __Text, _md, _plus, _scope, _tmpscope, _xml}
 
   // convenience methods 
   private def LL[A](x: A*): List[List[A]] = List(List(x:_*))
@@ -172,10 +171,10 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
 
   /** could optimize if args.length == 0, args.length == 1 AND args(0) is <: Node. */
   def makeXMLseq(pos: Position, args: Seq[Tree => Tree]): Tree => Tree = {
-    val buffer = ValDef(NoMods, _buf, TypeTree(), New(_scala_xml_NodeBuffer, List(Nil)))
-    val applies = (x: Tree) => args map (_(x)) filterNot isEmptyText map (t => Apply(Select(Ident(_buf), _plus), List(t)))
-
-    (t: Tree) => atPos(pos)( Block(buffer :: applies(t).toList, Ident(_buf)) )
+    val buffer = New(_scala_xml_NodeBuffer, List(Nil))
+    (x: Tree) => args.map(_(x)).filterNot(isEmptyText).foldLeft(buffer) {
+      (buf: Tree, node: Tree) => Apply(Select(buf, _plus), List(node))
+    }
   }
 
   /** Returns (Some(prefix) | None, rest) based on position of ':' */
