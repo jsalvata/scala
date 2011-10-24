@@ -394,13 +394,18 @@ trait MarkupParsers {
     }
 
     def xEmbeddedExpr: ElementType = {
+      val start= curOffset;
       val block= escapeToScala(parser.block(), "block")
-      (_: Tree) => block
+      handle.embeddedExpr(r2p(start, start, curOffset), block)
     }
 
     /** xScalaPatterns  ::= patterns
      */
-    def xScalaPatterns: List[ElementType] = escapeToScala(parser.seqPatterns(), "pattern").map((pat: Tree) => (_: Tree) => pat)
+    def xScalaPatterns: List[ElementType] = {
+      val start= curOffset;
+      val patterns= escapeToScala(parser.seqPatterns(), "pattern")
+      patterns.map(handle.scalaPattern(r2p(start, start, curOffset), _))
+    }
 
     def reportSyntaxError(pos: Int, str: String) = parser.syntaxError(pos, str)
     def reportSyntaxError(str: String) {
