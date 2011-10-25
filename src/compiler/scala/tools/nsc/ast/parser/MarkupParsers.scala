@@ -236,6 +236,33 @@ trait MarkupParsers {
       false
     }
 
+    /** TODO: to keep the existing design pattern, this method should be pushed down
+     *  from MarkupParserCommon, instead of overridden here.
+     * 
+     *  TODO: the required syntax for scala PIs is <?scala {block}?>, where the block
+     *  evaluates to the desired unmarshaller. Unbracketed expressions should
+     *  be accepted too.
+     */
+    override def xProcInstr: ElementType = {
+      val n = xName
+      // TODO: bug: XML syntax requires either a space or the end of the PI here.
+      //   but I don't want to break backward compatibility (yet).
+      xSpaceOpt
+      if (n == "scala") {
+        if (ch != '{') 
+          reportSyntaxError(" expected start of Scala block")
+        nextch
+        val res= handle.scalaProcInstr(tmppos, xEmbeddedExpr)
+        xSpaceOpt
+        if (ch != '?' || { nextch; ch } != '>')
+          reportSyntaxError(" expected end of processing instruction")
+        nextch
+        res
+      }
+      else
+        xTakeUntil(mkProcInstr(_, n, _), () => tmppos, "?>")
+    }
+
     def content: Buffer[ElementType] = {
       val ts = new ArrayBuffer[ElementType]
       while (true) {

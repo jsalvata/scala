@@ -47,6 +47,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _scope: NameType    = "$scope"
     val _tmpscope: NameType = "$tmpscope"
     val _xml: NameType      = "xml"
+    val _xmlUnmarshaller: NameType = "$xmlUnmarshaller"
   }
 
   private object xmltypes extends XMLTypeNames {
@@ -61,7 +62,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   import xmltypes.{_Comment, _Elem, _EntityRef, _Group, _MetaData, _NamespaceBinding, _NodeBuffer, 
     _PrefixedAttribute, _ProcInstr, _Text, _Unparsed, _UnprefixedAttribute}
   
-  import xmlterms.{_Null, __Elem, __Text, _md, _plus, _scope, _tmpscope, _xml}
+  import xmlterms.{_Null, __Elem, __Text, _md, _plus, _scope, _tmpscope, _xml, _xmlUnmarshaller}
 
   // convenience methods 
   private def LL[A](x: A*): List[List[A]] = List(List(x:_*))
@@ -135,13 +136,21 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   def makeText1(txt: Tree)                  = buf_&++(New(_scala_xml_Text, LL(txt)))
   def comment(pos: Position, text: String)  = buf_&++(atPos(pos)( Comment(const(text)) ))
   def charData(pos: Position, txt: String)  = atPos[Tree](pos) _ compose makeText1(const(txt))
-  
+
   def procInstr(pos: Position, target: String, txt: String) =
     buf_&++( atPos(pos)( ProcInstr(const(target), const(txt)) ) )
 
+  /**
+   * TODO: for type safety, use a marker trait for XML unmarshallers instead of AnyRef.
+   */
+  def scalaProcInstr(pos: Position, unmarshaller: Tree => Tree) =
+    (x: Tree) => atPos(pos)( Block(
+        List(ValDef(NoMods, _xmlUnmarshaller, gen.scalaAnyRefConstr, unmarshaller(null) )),
+        x))
+
   def embeddedExpr(pos: Position, expr: Tree) = buf_&++(atPos[Tree](pos)( expr ));
   def scalaPattern(pos: Position, pat: Tree) = buf_&++(atPos[Tree](pos)( pat ));
-  
+
   protected def Comment(txt: Tree)                  = New(_scala_xml_Comment, LL(txt))
   protected def ProcInstr(target: Tree, txt: Tree)  = New(_scala_xml_ProcInstr, LL(target, txt))
 

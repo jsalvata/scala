@@ -1,0 +1,4 @@
+typed-xml-scala-processing-instruction-3.scala:2: error: in XML literal:  expected end of processing instruction
+  <?scala {null}>
+                ^
+one error found
