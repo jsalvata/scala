@@ -43,7 +43,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val __Elem: NameType    = "Elem"
     val __Text: NameType    = "Text"
     val _md: NameType       = "$md"
-    val _plus: NameType     = "$amp$plus"
+    val _plus: NameType     = "$amp$plus$colon"
     val _scope: NameType    = "$scope"
     val _tmpscope: NameType = "$tmpscope"
     val _xml: NameType      = "xml"
@@ -144,12 +144,13 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
    * TODO: for type safety, use a marker trait for XML unmarshallers instead of AnyRef.
    */
   def scalaProcInstr(pos: Position, unmarshaller: Tree => Tree) =
-    (x: Tree) => atPos(pos)( Block(
-        List(ValDef(NoMods, _xmlUnmarshaller, gen.scalaAnyRefConstr, unmarshaller(null) )),
-        x))
+    (x: Tree) => atPos(pos)({
+      val pi= ValDef(NoMods, _xmlUnmarshaller, gen.scalaAnyRefConstr, unmarshaller(null) )
+      if (x== null) pi
+      else Block( List(pi), x )})
 
-  def embeddedExpr(pos: Position, expr: Tree) = buf_&++(atPos[Tree](pos)( expr ));
-  def scalaPattern(pos: Position, pat: Tree) = buf_&++(atPos[Tree](pos)( pat ));
+  def embeddedExpr(pos: Position, expr: Tree) = buf_&++(atPos[Tree](pos)( expr ))
+  def scalaPattern(pos: Position, pat: Tree) = buf_&++(atPos[Tree](pos)( pat ))
 
   protected def Comment(txt: Tree)                  = New(_scala_xml_Comment, LL(txt))
   protected def ProcInstr(target: Tree, txt: Tree)  = New(_scala_xml_ProcInstr, LL(target, txt))
@@ -190,9 +191,9 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   /** could optimize if args.length == 0, args.length == 1 AND args(0) is <: Node. */
   def makeXMLseq(pos: Position, args: Seq[Tree => Tree]): Tree => Tree = {
     val buffer = New(_scala_xml_NodeBuffer, List(Nil))
-    // map(_(x)).filterNot(isEmptyText).
-    (x: Tree) => args.foldLeft(buffer) {
-      (buf: Tree, node: Tree => Tree) => node(buf)
+    // args.filterNot(isEmptyText)....
+    (x: Tree) => args.foldRight(buffer) {
+      (node: Tree => Tree, buf: Tree) => node(buf)
     }
   }
   
