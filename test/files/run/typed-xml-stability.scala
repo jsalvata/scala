@@ -96,7 +96,14 @@ object Test extends App {
     <wsdl:definitions name={x} xmlns:tns = { "target1" } >
     </wsdl:definitions>,
     <wsdl:definitions name={x} xmlns:tns = { Text("target3") } >
-    </wsdl:definitions>
+    </wsdl:definitions>,
+    <a href={None}>none</a>,
+    <a href={Some(Text("http://www.salir.com/"))}>Salir.com</a>,
+    <?pi single?>,
+    <?pi first?><more/>,
+    <a><?pi embdeeded first?><more/></a>,
+    <a><some/><?pi embedded middle?><more/></a>,
+    <a><some/><?pi embedded last?></a>
   )
 
   val originalXml = List[NodeSeq]({
@@ -712,6 +719,79 @@ object Test extends App {
         new _root_.scala.xml.Elem("wsdl", "definitions", $md, $scope, ({
           val $buf = new _root_.scala.xml.NodeBuffer();
           $buf.$amp$plus(new _root_.scala.xml.Text("\012    "));
+          $buf
+        }: _*))
+      }
+    }, {
+      {
+        var $md: _root_.scala.xml.MetaData = _root_.scala.xml.Null;
+        $md = new _root_.scala.xml.UnprefixedAttribute("href", None, $md);
+        new _root_.scala.xml.Elem(null, "a", $md, $scope, ({
+          val $buf = new _root_.scala.xml.NodeBuffer();
+          $buf.$amp$plus(new _root_.scala.xml.Text("none"));
+          $buf
+        }: _*))
+      }
+    }, {
+      {
+        var $md: _root_.scala.xml.MetaData = _root_.scala.xml.Null;
+        $md = new _root_.scala.xml.UnprefixedAttribute("href", Some(Text("http://www.salir.com/")), $md);
+        new _root_.scala.xml.Elem(null, "a", $md, $scope, ({
+          val $buf = new _root_.scala.xml.NodeBuffer();
+          $buf.$amp$plus(new _root_.scala.xml.Text("Salir.com"));
+          $buf
+        }: _*))
+      }
+    }, new _root_.scala.xml.ProcInstr("pi", "single"), {
+      val $buf = new _root_.scala.xml.NodeBuffer();
+      $buf.$amp$plus(new _root_.scala.xml.ProcInstr("pi", "first"));
+      $buf.$amp$plus({
+        {
+          new _root_.scala.xml.Elem(null, "more", _root_.scala.xml.Null, $scope)
+        }
+      });
+      $buf
+    }, {
+      {
+        new _root_.scala.xml.Elem(null, "a", _root_.scala.xml.Null, $scope, ({
+          val $buf = new _root_.scala.xml.NodeBuffer();
+          $buf.$amp$plus(new _root_.scala.xml.ProcInstr("pi", "embdeeded first"));
+          $buf.$amp$plus({
+            {
+              new _root_.scala.xml.Elem(null, "more", _root_.scala.xml.Null, $scope)
+            }
+          });
+          $buf
+        }: _*))
+      }
+    }, {
+      {
+        new _root_.scala.xml.Elem(null, "a", _root_.scala.xml.Null, $scope, ({
+          val $buf = new _root_.scala.xml.NodeBuffer();
+          $buf.$amp$plus({
+            {
+              new _root_.scala.xml.Elem(null, "some", _root_.scala.xml.Null, $scope)
+            }
+          });
+          $buf.$amp$plus(new _root_.scala.xml.ProcInstr("pi", "embedded middle"));
+          $buf.$amp$plus({
+            {
+              new _root_.scala.xml.Elem(null, "more", _root_.scala.xml.Null, $scope)
+            }
+          });
+          $buf
+        }: _*))
+      }
+    }, {
+      {
+        new _root_.scala.xml.Elem(null, "a", _root_.scala.xml.Null, $scope, ({
+          val $buf = new _root_.scala.xml.NodeBuffer();
+          $buf.$amp$plus({
+            {
+              new _root_.scala.xml.Elem(null, "some", _root_.scala.xml.Null, $scope)
+            }
+          });
+          $buf.$amp$plus(new _root_.scala.xml.ProcInstr("pi", "embedded last"));
           $buf
         }: _*))
       }
