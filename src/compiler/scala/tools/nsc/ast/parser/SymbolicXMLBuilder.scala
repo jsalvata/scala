@@ -42,8 +42,9 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _Null: NameType     = "Null"
     val __Elem: NameType    = "Elem"
     val __Text: NameType    = "Text"
+    val _buf: NameType      = "$buf"
     val _md: NameType       = "$md"
-    val _plus: NameType     = "$amp$plus$colon"
+    val _plus: NameType     = "$amp$plus"
     val _scope: NameType    = "$scope"
     val _tmpscope: NameType = "$tmpscope"
     val _xml: NameType      = "xml"
@@ -62,7 +63,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   import xmltypes.{_Comment, _Elem, _EntityRef, _Group, _MetaData, _NamespaceBinding, _NodeBuffer, 
     _PrefixedAttribute, _ProcInstr, _Text, _Unparsed, _UnprefixedAttribute}
   
-  import xmlterms.{_Null, __Elem, __Text, _md, _plus, _scope, _tmpscope, _xml, _xmlUnmarshaller}
+  import xmlterms.{_Null, __Elem, __Text, _buf, _md, _plus, _scope, _tmpscope, _xml, _xmlUnmarshaller}
 
   // convenience methods 
   private def LL[A](x: A*): List[List[A]] = List(List(x:_*))
@@ -144,10 +145,8 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
    * TODO: for type safety, use a marker trait for XML unmarshallers instead of AnyRef.
    */
   def scalaProcInstr(pos: Position, unmarshaller: Tree => Tree) =
-    (x: Tree) => atPos(pos)({
-      val pi= ValDef(NoMods, _xmlUnmarshaller, gen.scalaAnyRefConstr, unmarshaller(null) )
-      if (x== null) pi
-      else Block( List(pi), x )})
+    (x: Tree) => atPos(pos)(
+      ValDef(NoMods, _xmlUnmarshaller, gen.scalaAnyRefConstr, unmarshaller(null) ))
 
   def embeddedExpr(pos: Position, expr: Tree) = buf_&++(atPos[Tree](pos)( expr ))
   def scalaPattern(pos: Position, pat: Tree) = buf_&++(atPos[Tree](pos)( pat ))
@@ -190,11 +189,11 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
 
   /** could optimize if args.length == 0, args.length == 1 AND args(0) is <: Node. */
   def makeXMLseq(pos: Position, args: Seq[Tree => Tree]): Tree => Tree = {
-    val buffer = New(_scala_xml_NodeBuffer, List(Nil))
-    // args.filterNot(isEmptyText)....
-    (x: Tree) => args.foldRight(buffer) {
-      (node: Tree => Tree, buf: Tree) => node(buf)
-    }
+    val buffer = ValDef(NoMods, _buf, TypeTree(), New(_scala_xml_NodeBuffer, List(Nil)))
+    // map (_(x)) filterNot isEmptyText 
+    val applies = (x: Tree) => args map (t => t(Ident(_buf)))
+
+    (t: Tree) => atPos(pos)( Block(buffer :: applies(t).toList, Ident(_buf)) )
   }
   
   /** Returns (Some(prefix) | None, rest) based on position of ':' */

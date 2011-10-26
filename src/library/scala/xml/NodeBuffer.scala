@@ -43,19 +43,4 @@ class NodeBuffer extends scala.collection.mutable.ArrayBuffer[Node] {
     }
     this
   }
-
-  /**
-   * Prepend given object to this buffer. Same rules as &+
-   */
-  def &+:(o: Any): NodeBuffer = {
-    o match {
-      case null | _: Unit | Text("")  => // ignore
-      case it: Iterator[_]            => it.scanRight(()){(d: Any, u: Unit) => d &+: this; u }
-      case n: Node                    => super.+=:(n)
-      case ns: Iterable[_]            => ns.iterator &+: this
-      case ns: Array[_]               => ns.iterator &+: this
-      case d                          => super.+=:(new Atom(d))
-    }
-    this
-  }
 }
