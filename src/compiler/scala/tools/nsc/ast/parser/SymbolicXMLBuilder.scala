@@ -126,9 +126,9 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     else makeText1(const(txt)))
   }
 
-  def buf_&++(node: Tree) = {
+  private def buf_&++(node: Tree) = {
     (buf: Tree) => {
-      if (buf == null) node
+      if (buf == null || isEmptyText(node)) node
       else Apply(Select(buf, _plus), List(node))
     }
   }
@@ -190,12 +190,11 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   /** could optimize if args.length == 0, args.length == 1 AND args(0) is <: Node. */
   def makeXMLseq(pos: Position, args: Seq[Tree => Tree]): Tree => Tree = {
     val buffer = ValDef(NoMods, _buf, TypeTree(), New(_scala_xml_NodeBuffer, List(Nil)))
-    // map (_(x)) filterNot isEmptyText 
-    val applies = (x: Tree) => args map (t => t(Ident(_buf)))
+    val applies = (x: Tree) => args map (t => t(Ident(_buf))) filterNot isEmptyText
 
     (t: Tree) => atPos(pos)( Block(buffer :: applies(t).toList, Ident(_buf)) )
   }
-  
+
   /** Returns (Some(prefix) | None, rest) based on position of ':' */
   def splitPrefix(name: String): (Option[String], String) = splitWhere(name, _ == ':', true) match {
     case Some((pre, rest))  => (Some(pre), rest)
