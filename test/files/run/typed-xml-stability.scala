@@ -798,6 +798,6 @@ object Test extends App {
     })
 
   for( (lit, orig) <- xmlLiterals zip originalXml ) {
-    assert(lit xml_== orig)
+    assert(lit strict_== orig)
   }
 }
