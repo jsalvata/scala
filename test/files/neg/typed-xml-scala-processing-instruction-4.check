@@ -1,0 +1,6 @@
+typed-xml-scala-processing-instruction-4.scala:2: error: type mismatch;
+ found   : String("hello")
+ required: scala.xml.XMLUnmarshaller
+  <?scala { "hello" } ?>
+            ^
+one error found

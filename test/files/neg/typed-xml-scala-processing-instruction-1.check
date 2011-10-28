@@ -5,9 +5,7 @@ typed-xml-scala-processing-instruction-1.scala:3: error: type mismatch;
                             ^
 typed-xml-scala-processing-instruction-1.scala:7: error: type mismatch;
  found   : Unit
- required: AnyRef
-Note: Unit is not implicitly converted to AnyRef.  You can safely
-pattern match `x: AnyRef` or cast `x.asInstanceOf[AnyRef]` to do so.
+ required: scala.xml.XMLUnmarshaller
     <?scala {()}?>
              ^
 two errors found

@@ -252,7 +252,8 @@ trait MarkupParsers {
         if (ch != '{') 
           reportSyntaxError(" expected start of Scala block")
         nextch
-        val res= handle.scalaProcInstr(tmppos, xEmbeddedExpr)
+        val block= escapeToScala(parser.block(), "block")
+        val res= handle.scalaProcInstr(tmppos, block)
         xSpaceOpt
         if (ch != '?' || { nextch; ch } != '>')
           reportSyntaxError(" expected end of processing instruction")

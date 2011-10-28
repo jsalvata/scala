@@ -1,6 +1,8 @@
+import scala.xml.SymbolicXMLUnmarshaller
+
 class Test {
   def f1 = {
-    <?scala {""}?><more><xml/></more>
+    <?scala { new SymbolicXMLUnmarshaller() }?><more><xml/></more>
     ;
     <xml/>
   }
@@ -10,7 +12,7 @@ class Test {
     <xml/>
   }
   def f3= {
-    <?scala {""}?>
+    <?scala { new SymbolicXMLUnmarshaller() }?>
     ;
     <xml/>
   }

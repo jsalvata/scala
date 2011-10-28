@@ -36,6 +36,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _Text: NameType                = "Text"
     val _Unparsed: NameType            = "Unparsed"
     val _UnprefixedAttribute: NameType = "UnprefixedAttribute"
+    val _XMLUnmarshaller: NameType     = "XMLUnmarshaller"
   }
 
   private trait XMLTermNames extends TermNames {
@@ -61,7 +62,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   }
 
   import xmltypes.{_Comment, _Elem, _EntityRef, _Group, _MetaData, _NamespaceBinding, _NodeBuffer, 
-    _PrefixedAttribute, _ProcInstr, _Text, _Unparsed, _UnprefixedAttribute}
+    _PrefixedAttribute, _ProcInstr, _Text, _Unparsed, _UnprefixedAttribute, _XMLUnmarshaller}
   
   import xmlterms.{_Null, __Elem, __Text, _buf, _md, _plus, _scope, _tmpscope, _xml, _xmlUnmarshaller}
 
@@ -86,6 +87,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   private def _scala_xml_Text               = _scala_xml(_Text)
   private def _scala_xml_Unparsed           = _scala_xml(_Unparsed)
   private def _scala_xml_UnprefixedAttribute= _scala_xml(_UnprefixedAttribute)
+  private def _scala_xml_XMLUnmarshaller    = _scala_xml(_XMLUnmarshaller)
   private def _scala_xml__Elem              = _scala_xml(__Elem)
   private def _scala_xml__Text              = _scala_xml(__Text)
 
@@ -141,12 +143,9 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   def procInstr(pos: Position, target: String, txt: String) =
     buf_&++( atPos(pos)( ProcInstr(const(target), const(txt)) ) )
 
-  /**
-   * TODO: for type safety, use a marker trait for XML unmarshallers instead of AnyRef.
-   */
-  def scalaProcInstr(pos: Position, unmarshaller: Tree => Tree) =
+  def scalaProcInstr(pos: Position, unmarshaller: Tree) =
     (x: Tree) => atPos(pos)(
-      ValDef(NoMods, _xmlUnmarshaller, gen.scalaAnyRefConstr, unmarshaller(null) ))
+      ValDef(NoMods, _xmlUnmarshaller, _scala_xml_XMLUnmarshaller, unmarshaller ))
 
   def embeddedExpr(pos: Position, expr: Tree) = buf_&++(atPos[Tree](pos)( expr ))
   def scalaPattern(pos: Position, pat: Tree) = buf_&++(atPos[Tree](pos)( pat ))
