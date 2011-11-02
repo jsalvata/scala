@@ -1,6 +1,6 @@
 object myBreak extends scala.xml.Unparsed("<br />")
 
-object Test extends App {
+object Test { // Used to be "extends App" but was hitting https://issues.scala-lang.org/browse/SI-5134
   val com = <!-- thissa comment -->
   val pi  = <?this is a pi foo bar = && {{ ?>
   val crz = <![CDATA[
@@ -26,4 +26,5 @@ Ours is the portal of hope, come as you are."
     case scala.xml.Node("foo",md,child@_*) =>
   }
 
+  def main(argv: Array[String]) { }
 }

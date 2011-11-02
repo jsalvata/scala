@@ -1,18 +1,13 @@
-import scala.xml.SymbolicXMLUnmarshaller
+import scala.xml.ScalaXMLUnmarshaller
 
 class Test {
   def f1 = {
-    <?scala { new SymbolicXMLUnmarshaller() }?><more><xml/></more>
+    <?scala { ScalaXMLUnmarshaller }?><more><xml/></more>
     ;
     <xml/>
   }
   def f2= {
-    <embedded><before/><?scala  {null}  ?><after/></embedded>
-    ;
-    <xml/>
-  }
-  def f3= {
-    <?scala { new SymbolicXMLUnmarshaller() }?>
+    <?scala { ScalaXMLUnmarshaller }?>
     ;
     <xml/>
   }

@@ -82,7 +82,7 @@ trait MarkupParsers {
     protected def ch_returning_nextch: Char = {
       val result = ch; input.nextChar(); result
     }
-
+    
     def mkProcInstr(position: Position, name: String, text: String): ElementType =
       parser.symbXMLBuilder.procInstr(position, name, text)
 
@@ -220,15 +220,16 @@ trait MarkupParsers {
      *  appends trees to ts as side-effect.
      *
      *  @param ts ...
+     *  @param atStartOfLiteral true iif this is the initial XmlContent in an XmlExpr (see ScalaReference 10.1)
      *  @return   ...
      */
-    private def content_LT(ts: ArrayBuffer[ElementType]): Boolean = {
+    private def content_LT(ts: ArrayBuffer[ElementType], atStartOfLiteral: Boolean): Boolean = {
       if (ch == '/')
         return true   // end tag
 
       val toAppend = ch match {
         case '!'    => nextch ; if (ch =='[') xCharData else xComment // CDATA or Comment
-        case '?'    => nextch ; xProcInstr                            // PI
+        case '?'    => nextch ; xProcInstr(atStartOfLiteral)          // PI
         case _      => element                                        // child node
       }
 
@@ -237,31 +238,38 @@ trait MarkupParsers {
     }
 
     /** TODO: to keep the existing design pattern, this method should be pushed down
-     *  from MarkupParserCommon, instead of overridden here.
+     *  from MarkupParserCommon, instead of overridden here?
      * 
      *  TODO: the required syntax for scala PIs is <?scala {block}?>, where the block
-     *  evaluates to the desired unmarshaller. Unbracketed expressions should
-     *  be accepted too.
+     *  evaluates to the desired unmarshaller. Think out better syntax.
+     * 
+     *  @param atStartOfLiteral true iif this is the initial XmlContent in an XmlExpr (see ScalaReference 10.1)
      */
-    override def xProcInstr: ElementType = {
+    def xProcInstr(atStartOfLiteral: Boolean): ElementType = {
       val n = xName
-      // TODO: bug: XML syntax requires either a space or the end of the PI here.
-      //   but I don't want to break backward compatibility (yet).
-      xSpaceOpt
       if (n == "scala") {
-        if (ch != '{') 
-          reportSyntaxError(" expected start of Scala block")
+        // TODO: bug: XML syntax requires either a space or the end of the PI here.
+        //   but I don't want to break backward compatibility (yet), so I'm only requiring
+        //   it for scala PIs
+        xSpace
+        xSpaceOpt
+        if (!atStartOfLiteral)
+          reportSyntaxError("scala processing instructions can only appear at start of XML literal")
+        else if (ch != '{') 
+          reportSyntaxError("expected start of Scala block")
         nextch
         val block= escapeToScala(parser.block(), "block")
         val res= handle.scalaProcInstr(tmppos, block)
         xSpaceOpt
         if (ch != '?' || { nextch; ch } != '>')
-          reportSyntaxError(" expected end of processing instruction")
+          reportSyntaxError("expected end of processing instruction")
         nextch
         res
       }
-      else
-        xTakeUntil(mkProcInstr(_, n, _), () => tmppos, "?>")
+      else {
+        xSpaceOpt
+        xTakeUntil(handle.procInstr(_, n, _), () => tmppos, "?>")
+      }
     }
 
     def content: Buffer[ElementType] = {
@@ -273,7 +281,7 @@ trait MarkupParsers {
           tmppos = o2p(curOffset)
           ch match {
             // end tag, cdata, comment, pi or child node
-            case '<'  => nextch ; if (content_LT(ts)) return ts
+            case '<'  => nextch ; if (content_LT(ts, false)) return ts
             // either the character '{' or an embedded scala block }
             case '{'  => content_BRACE(tmppos, ts)  // }
             // EntityRef or CharRef 
@@ -337,7 +345,7 @@ trait MarkupParsers {
     }
 
     /** Some try/catch/finally logic used by xLiteral and xLiteralPattern.  */
-    private def xLiteralCommon(f: () => ElementType, ifTruncated: String => Unit): ElementType = {
+    private def xLiteralCommon(f: () => Tree, ifTruncated: String => Unit): Tree = {
       try return f()
       catch {
         case c @ TruncatedXMLControl  =>
@@ -349,9 +357,9 @@ trait MarkupParsers {
       }
       finally parser.in resume Tokens.XMLSTART
       
-      (_: Tree) => parser.errorTermTree
+      parser.errorTermTree
     }
-      
+
     /** Use a lookahead parser to run speculative body, and return the first char afterward. */
     private def charComingAfter(body: => Unit): Char = {
       try {
@@ -373,7 +381,7 @@ trait MarkupParsers {
         val ts = new ArrayBuffer[ElementType]
         val start = curOffset
         tmppos = o2p(curOffset)    // Iuli: added this line, as it seems content_LT uses tmppos when creating trees
-        content_LT(ts)
+        content_LT(ts, true)
       
         // parse more XML ?        
         if (charComingAfter(xSpaceOpt) == '<') {
@@ -383,15 +391,11 @@ trait MarkupParsers {
             ts append element
             xSpaceOpt
           }
-          handle.makeXMLseq(r2p(start, start, curOffset), ts)
         }
-        else {
-          assert(ts.length == 1)
-          ts(0)
-        }
+        handle.unmarshallLiteral(r2p(start, start, curOffset), ts)
       },
       msg => parser.incompleteInputError(msg)
-    )(null)
+    )
 
     /** @see xmlPattern. resynchronizes after successful parse 
      *  @return this xml pattern
@@ -399,15 +403,16 @@ trait MarkupParsers {
     def xLiteralPattern: Tree = xLiteralCommon(
       () => {
         input = parser.in
-        saving[Boolean, ElementType](handle.isPattern, handle.isPattern = _) {
+        saving[Boolean, Tree](handle.isPattern, handle.isPattern = _) {
+          val start= curOffset
           handle.isPattern = true
           val tree = xPattern
           xSpaceOpt
-          tree
+          handle.unmarshallPattern(r2p(start, start, curOffset), tree)
         }
       },
       msg => parser.syntaxError(curOffset, msg)
-    )(null)
+    )
 
     def escapeToScala[A](op: => A, kind: String) = {
       xEmbeddedBlock = false
@@ -488,7 +493,7 @@ trait MarkupParsers {
         debugLastStartElement.pop
       }
       
-      handle.makeXMLpat(r2p(start, start, curOffset), qname, ts)
+      handle.pattern(r2p(start, start, curOffset), qname, ts)
     }
   } /* class MarkupParser */
 }

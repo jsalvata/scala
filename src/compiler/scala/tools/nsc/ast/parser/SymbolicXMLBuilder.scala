@@ -7,10 +7,12 @@ package scala.tools.nsc
 package ast.parser
 
 import scala.collection.{ mutable, immutable }
+import scala.reflect.internal.Flags
 import xml.{ EntityRef, Text }
 import xml.XML.{ xmlns }
 import symtab.Flags.MUTABLE
 import scala.tools.util.StringOps.splitWhere
+import scala.collection.mutable.ListBuffer
 
 /** This class builds instance of `Tree` that represent XML.
  *
@@ -24,34 +26,50 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   private[parser] var isPattern: Boolean = _
 
   private trait XMLTypeNames extends TypeNames {
-    val _Comment: NameType             = "Comment"
-    val _Elem: NameType                = "Elem"
-    val _EntityRef: NameType           = "EntityRef"
-    val _Group: NameType               = "Group"
-    val _MetaData: NameType            = "MetaData"
-    val _NamespaceBinding: NameType    = "NamespaceBinding"
-    val _NodeBuffer: NameType          = "NodeBuffer"
-    val _PrefixedAttribute: NameType   = "PrefixedAttribute"
-    val _ProcInstr: NameType           = "ProcInstr"
-    val _Text: NameType                = "Text"
-    val _Unparsed: NameType            = "Unparsed"
-    val _UnprefixedAttribute: NameType = "UnprefixedAttribute"
-    val _XMLUnmarshaller: NameType     = "XMLUnmarshaller"
+    val _NamespaceBinding:      NameType = "NamespaceBinding"
+    val _XMLUnmarshaller:       NameType = "XMLUnmarshaller"
   }
 
   private trait XMLTermNames extends TermNames {
-    val _Null: NameType     = "Null"
-    val __Elem: NameType    = "Elem"
-    val __Text: NameType    = "Text"
-    val _buf: NameType      = "$buf"
-    val _md: NameType       = "$md"
-    val _plus: NameType     = "$amp$plus"
-    val _scope: NameType    = "$scope"
-    val _tmpscope: NameType = "$tmpscope"
+    val _None:                  NameType = "None"
+    val _Some:                  NameType = "Some"
+
     val _xml: NameType      = "xml"
-    val _xmlUnmarshaller: NameType = "$xmlUnmarshaller"
+
+    val _xmlUnmarshaller:       NameType = "$xmlUnmarshaller"
+
+    // The following are named after SAX2 methods
+    val _startDocument:         NameType = "startDocument"
+    val _endDocument:           NameType = "endDocument"
+    val _startElement:          NameType = "startElement"
+    val _endElement:            NameType = "endElement"
+    val _characters:            NameType = "characters"
+    val _comment   :            NameType = "comment"
+    val _startCDATA:            NameType = "startCDATA"
+    val _endCDATA  :            NameType = "endCDATA"
+    val _skippedEntity:         NameType = "skippedEntity" // TODO: do the semantics of this method match SAX2?
+    val _processingInstruction: NameType = "processingInstruction"
+    val _startPrefixMapping:    NameType = "startPrefixMapping"
+    val _endPrefixMapping:      NameType = "endPrefixMapping" // Signals end of mapping value (uri), NOT end of scope as in SAX2
+      
+    // These behave similarly, but have no mapping in SAX2
+    // (because they are not general XML, but specific to Scala)
+    val _elementPattern:        NameType = "elementPattern"
+    val _embeddedExpression:    NameType = "embeddedExpression"
+    val _unparsed:              NameType = "unparsed"
+    val _startGroup:            NameType = "startGroup"
+    val _endGroup:              NameType = "endGroup"
+      
+    // These don't have a mapping in SAX2 either,
+    // from design preference. TODO: I still have doubts.
+    val _startAttribute:        NameType = "startAttribute"
+    val _endAttribute:          NameType = "endAttribute"
   }
 
+  private trait XMLMethodNames {
+    
+  }
+  
   private object xmltypes extends XMLTypeNames {
     type NameType = TypeName
     implicit def createNameType(name: String): TypeName = newTypeName(name)
@@ -61,10 +79,14 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     implicit def createNameType(name: String): TermName = newTermName(name)
   }
 
-  import xmltypes.{_Comment, _Elem, _EntityRef, _Group, _MetaData, _NamespaceBinding, _NodeBuffer, 
-    _PrefixedAttribute, _ProcInstr, _Text, _Unparsed, _UnprefixedAttribute, _XMLUnmarshaller}
+  import xmltypes.{_NamespaceBinding, _XMLUnmarshaller }
   
-  import xmlterms.{_Null, __Elem, __Text, _buf, _md, _plus, _scope, _tmpscope, _xml, _xmlUnmarshaller}
+  import xmlterms.{_None, _Some, _xml, _xmlUnmarshaller,
+    _startDocument, _endDocument, _startElement, _endElement, _elementPattern,
+    _characters, _comment, _startCDATA, _endCDATA, _skippedEntity, _processingInstruction,
+    _startPrefixMapping, _endPrefixMapping,
+    _embeddedExpression, _unparsed, _startGroup, _endGroup,
+    _startAttribute, _endAttribute}
 
   // convenience methods 
   private def LL[A](x: A*): List[List[A]] = List(List(x:_*))
@@ -73,220 +95,112 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   private def wildStar                      = Ident(tpnme.WILDCARD_STAR)
   private def _scala(name: Name)            = Select(Select(Ident(nme.ROOTPKG), nme.scala_), name)
   private def _scala_xml(name: Name)        = Select(_scala(_xml), name)
-  
-  private def _scala_xml_Comment            = _scala_xml(_Comment)
-  private def _scala_xml_Elem               = _scala_xml(_Elem)
-  private def _scala_xml_EntityRef          = _scala_xml(_EntityRef)
-  private def _scala_xml_Group              = _scala_xml(_Group)
-  private def _scala_xml_MetaData           = _scala_xml(_MetaData)
+
+  private def _scala_None                   = _scala(_None)
+  private def _scala_Some                   = _scala(_Some)
   private def _scala_xml_NamespaceBinding   = _scala_xml(_NamespaceBinding)
-  private def _scala_xml_NodeBuffer         = _scala_xml(_NodeBuffer)
-  private def _scala_xml_Null               = _scala_xml(_Null)
-  private def _scala_xml_PrefixedAttribute  = _scala_xml(_PrefixedAttribute)
-  private def _scala_xml_ProcInstr          = _scala_xml(_ProcInstr)
-  private def _scala_xml_Text               = _scala_xml(_Text)
-  private def _scala_xml_Unparsed           = _scala_xml(_Unparsed)
-  private def _scala_xml_UnprefixedAttribute= _scala_xml(_UnprefixedAttribute)
   private def _scala_xml_XMLUnmarshaller    = _scala_xml(_XMLUnmarshaller)
-  private def _scala_xml__Elem              = _scala_xml(__Elem)
-  private def _scala_xml__Text              = _scala_xml(__Text)
 
-  /** Wildly wrong documentation deleted in favor of "self-documenting code." */
-  protected def mkXML(
-    pos: Position,
-    isPattern: Boolean,
-    pre: Tree,
-    label: Tree,
-    attrs: Tree,
-    scope:Tree,
-    children: Seq[Tree => Tree]): Tree => Tree =
-  {
-    def starArgs = 
-      if (children.isEmpty) (_:Tree) => Nil
-      else {
-        val seq= makeXMLseq(pos, children)
-        (_: Tree) => List(Typed(seq(null), wildStar))
-      }
+  private def apply(pos: Position, method: TermName, trees: Tree*): Tree => Tree =
+    (unmarshaller: Tree) => atPos(pos)( Apply(Select(unmarshaller, method), trees.toList) )
+  private def apply(pos: Position, method: TermName, text: String, texts: String*): Tree => Tree =
+    apply(pos, method, const(text)+:(texts map {const(_)}) : _*)
 
-    def pat    = {
-      val textPat= convertToTextPat(children)
-      (_: Tree) => Apply(_scala_xml__Elem, List(pre, label, wild, wild) ::: textPat.map(_(null)))
-    }
-    def nonpat = {
-      val args= starArgs
-      (_: Tree) => New(_scala_xml_Elem, List(List(pre, label, attrs, scope) ::: args(null)))
+  final def entityRef(pos: Position, name: String) = apply(pos, _skippedEntity, name) 
+  final def text(pos: Position, text: String) = apply(pos, _characters, text)
+  final def comment(pos: Position, text: String) = apply(pos, _comment, text)
+  final def charData(pos: Position, text: String) = 
+        apply(pos, _endCDATA) compose apply(pos, _characters, text) compose apply(pos, _startCDATA)
+  final def procInstr(pos: Position, target: String, text: String) = apply(pos, _processingInstruction, target, text)
+
+  final def scalaProcInstr(pos: Position, unmarshaller: Tree) =
+    (_: Tree) => atPos(pos){
+      Block(List(ValDef(Modifiers(Flags.LAZY), _xmlUnmarshaller, _scala_xml_XMLUnmarshaller, unmarshaller)), unmarshaller)
+        // The ValDef just intends to throw an error at compile time if the unmarshaller is not such.
+        // Is there a better way?
     }
 
-    atPos[Tree](pos) _ compose { if (isPattern) pat else nonpat }
-  }
-  
-  final def entityRef(pos: Position, n: String) = buf_&++(atPos(pos)( New(_scala_xml_EntityRef, LL(const(n))) ))
-
-  // create scala.xml.Text here <: scala.xml.Node
-  final def text(pos: Position, txt: String): Tree => Tree = {
-    atPos[Tree](pos) _ compose (if (isPattern) makeTextPat((_:Tree) => const(txt))
-    else makeText1(const(txt)))
-  }
-
-  private def buf_&++(node: Tree) = {
-    (buf: Tree) => {
-      if (buf == null || isEmptyText(node)) node
-      else Apply(Select(buf, _plus), List(node))
-    }
-  }
-
-  def makeTextPat(txt: Tree => Tree)        = buf_&++(Apply(_scala_xml__Text, List(txt(null))))
-  def makeText1(txt: Tree)                  = buf_&++(New(_scala_xml_Text, LL(txt)))
-  def comment(pos: Position, text: String)  = buf_&++(atPos(pos)( Comment(const(text)) ))
-  def charData(pos: Position, txt: String)  = atPos[Tree](pos) _ compose makeText1(const(txt))
-
-  def procInstr(pos: Position, target: String, txt: String) =
-    buf_&++( atPos(pos)( ProcInstr(const(target), const(txt)) ) )
-
-  def scalaProcInstr(pos: Position, unmarshaller: Tree) =
-    (x: Tree) => atPos(pos)(
-      ValDef(NoMods, _xmlUnmarshaller, _scala_xml_XMLUnmarshaller, unmarshaller ))
-
-  def embeddedExpr(pos: Position, expr: Tree) = buf_&++(atPos[Tree](pos)( expr ))
-  def scalaPattern(pos: Position, pat: Tree) = buf_&++(atPos[Tree](pos)( pat ))
-
-  protected def Comment(txt: Tree)                  = New(_scala_xml_Comment, LL(txt))
-  protected def ProcInstr(target: Tree, txt: Tree)  = New(_scala_xml_ProcInstr, LL(target, txt))
+  final def embeddedExpr(pos: Position, expr: Tree) = apply(pos, _embeddedExpression, expr)
+  final def scalaPattern(pos: Position, pat: Tree) = apply(pos, _embeddedExpression, pat)
 
   /** @todo: attributes */
-  def makeXMLpat(pos: Position, n: String, args: Seq[Tree => Tree]): Tree => Tree = {
+  final def pattern(pos: Position, n: String, children: Seq[Tree => Tree]): Tree => Tree = {
     val (prepat, labpat) = splitPrefix(n) match {
       case (Some(pre), rest)  => (const(pre), const(rest))
       case _                  => (wild, const(n))
     }
-    mkXML(pos, true, prepat, labpat, null, null, args)
+    atPos[Tree](pos) _ compose
+      // apply(pos, _endElement) compose
+      // compose(children) compose -- TODO: we can't ignore the children!!
+      apply(pos, _elementPattern, prepat, labpat, wild)
   }
 
-  protected def convertToTextPat(t: Tree => Tree): Tree => Tree = t match {
-    case _: Literal => makeTextPat(t)
-    case _          => t
-  }
-  protected def convertToTextPat(buf: Seq[Tree => Tree]): List[Tree => Tree] = 
-    (buf map convertToTextPat).toList
-
-  def parseAttribute(pos: Position, s: String): Tree => Tree = {
+  final def parseAttribute(pos: Position, s: String): Tree => Tree = {
     val ts = xml.Utility.parseAttributeValue(s) map {
       case Text(s)      => text(pos, s)
       case EntityRef(s) => entityRef(pos, s)
     }
-    ts.length match {
-      case 0 => (_: Tree) => gen.mkNil
-      case 1 => ts.head
-      case _ => makeXMLseq(pos, ts.toList)
+    atPos[Tree](pos) _ compose compose(ts.toList)
+  }
+
+  private def compose(args: Seq[Tree => Tree]): Tree => Tree = {
+    args.fold(identity[Tree] _)((prev: Tree=>Tree, next: Tree=>Tree) => next compose prev)
+  }
+
+  final def unmarshallLiteral(pos: Position, args: Seq[Tree => Tree]): Tree = {
+    val expr = compose(args)(apply(pos, _startDocument)(Ident(_xmlUnmarshaller)))
+    expr match {
+      case Block(_, _) => ValDef(NoMods, _xmlUnmarshaller, TypeTree(), expr)
+          // a standalone <?scala unmarshaller?> defines value $xmlUnmarshaller
+      case _ => apply(pos, _endDocument)(expr)
     }
   }
 
-  def isEmptyText(t: Tree) = t match {
-    case Literal(Constant("")) => true
-    case _ => false
-  }
-
-  /** could optimize if args.length == 0, args.length == 1 AND args(0) is <: Node. */
-  def makeXMLseq(pos: Position, args: Seq[Tree => Tree]): Tree => Tree = {
-    val buffer = ValDef(NoMods, _buf, TypeTree(), New(_scala_xml_NodeBuffer, List(Nil)))
-    val applies = (x: Tree) => args map (t => t(Ident(_buf))) filterNot isEmptyText
-
-    (t: Tree) => atPos(pos)( Block(buffer :: applies(t).toList, Ident(_buf)) )
+  final def unmarshallPattern(pos: Position, arg: Tree => Tree): Tree = {
+    arg(apply(pos, _startDocument)(Ident(_xmlUnmarshaller)))
   }
 
   /** Returns (Some(prefix) | None, rest) based on position of ':' */
-  def splitPrefix(name: String): (Option[String], String) = splitWhere(name, _ == ':', true) match {
+  private def splitPrefix(name: String): (Option[String], String) = splitWhere(name, _ == ':', true) match {
     case Some((pre, rest))  => (Some(pre), rest)
     case _                  => (None, name)
   }
 
-  /** Various node constructions. */
-  def group(pos: Position, args: Seq[Tree => Tree]): Tree => Tree = {
-    val seq= makeXMLseq(pos, args)
-    (x: Tree) => atPos(pos)( New(_scala_xml_Group, LL(seq(x))) )
+  final def group(pos: Position, args: Seq[Tree => Tree]) = {
+    apply(pos, _endGroup) compose atPos[Tree](pos) _ compose compose(args) compose apply(pos, _startGroup)
   }
 
-  def unparsed(pos: Position, str: String): Tree => Tree =
-    (_: Tree) => atPos(pos)( New(_scala_xml_Unparsed, LL(const(str))) )
+  final def unparsed(pos: Position, str: String) = apply(pos, _unparsed, str)
 
-  def element(pos: Position, qname: String, attrMap: mutable.Map[String, Tree => Tree], args: Seq[Tree => Tree]): Tree => Tree = {
-    def handleNamespaceBinding(pre: String, z: String): Tree => Tree = {
-      def mkAssign(t: Tree => Tree): Tree => Tree = (x: Tree) => Assign(
-        Ident(_tmpscope), 
-        New(_scala_xml_NamespaceBinding, LL(const(pre), t(x), Ident(_tmpscope)))
-      )
+  final def element(pos: Position, qname: String, attrMap: mutable.Map[String, Tree => Tree], args: Seq[Tree => Tree]): Tree => Tree = {
 
-      val attr= attrMap(z)
-      val uri1 = (t: Tree) => attr(t) match {
-        case Apply(_, List(uri @ Literal(Constant(_)))) => mkAssign((_: Tree) => uri)(t)
-        case Select(_, nme.Nil)                         => mkAssign((_: Tree) => const(null))(t)  // allow for xmlns="" -- bug #1626
-        case x                                          => mkAssign((_: Tree) => x)(t)
-      }
-      attrMap -= z
-      uri1
+    def optional(name: Option[String]) = name match {
+      case Some(str) => Apply(_scala_Some, List(const(str)))
+      case None => _scala_None
     }
 
-    /** Extract all the namespaces from the attribute map. */
-    val namespaces: List[Tree => Tree] =
-      for (z <- attrMap.keys.toList ; if z startsWith xmlns) yield {
-        val ns = splitPrefix(z) match {
-          case (Some(_), rest)  => rest
-          case _                => null
-        }
-        handleNamespaceBinding(ns, z)
-      }
+    val attributes= new ListBuffer[Tree => Tree]
+    val bindings= new ListBuffer[Tree => Tree]
 
-    val (pre, newlabel) = splitPrefix(qname) match {
-      case (Some(p), x) => (p, x)
-      case (None, x)    => (null, x)
+    def prefixMapping(name: Option[String], value: Tree => Tree) = 
+      apply(pos, _endPrefixMapping) compose value compose apply(pos, _startPrefixMapping, optional(name))
+
+    def attribute(prefix: Option[String], localName: String, value: Tree => Tree) =
+      apply(pos, _endAttribute) compose value compose apply(pos, _startAttribute, optional(prefix), const(localName))
+    
+    for ((attrQName, attrValue) <- attrMap.iterator) splitPrefix(attrQName) match {
+      case (Some("xmlns"), rest)   => bindings += prefixMapping(Some(rest), attrValue)
+      case (None, "xmlns") => bindings += prefixMapping(None, attrValue)
+      case (ns, localName) => attributes += attribute(ns, localName, attrValue)
     }
 
-    def mkAttributeTree(pre: String, key: String, value: Tree => Tree) = atPos[Tree](pos) _ compose {
-      // XXX this is where we'd like to put Select(value, nme.toString_) for #1787
-      // after we resolve the Some(foo) situation.
-      val baseArgs = List((_: Tree) => const(key), value, (_: Tree) => Ident(_md))
-      val (clazz, attrArgs) =
-        if (pre == null) (_scala_xml_UnprefixedAttribute, baseArgs)
-                    else (_scala_xml_PrefixedAttribute  , ((_: Tree) => const(pre)) :: baseArgs)
+    val (pre, newlabel) = splitPrefix(qname)
 
-      (x: Tree) => Assign(Ident(_md), New(clazz, LL(attrArgs.map(_(x)): _*)))
-    }
-
-    def handlePrefixedAttribute(pre: String, key: String, value: Tree => Tree)  = mkAttributeTree(pre, key, value)
-    def handleUnprefixedAttribute(key: String, value: Tree => Tree)             = mkAttributeTree(null, key, value)
-
-    val attributes: List[Tree => Tree] =
-      for ((k, v) <- attrMap.toList.reverse) yield splitPrefix(k) match {
-        case (Some(pre), rest)  => handlePrefixedAttribute(pre, rest, v)
-        case _                  => handleUnprefixedAttribute(k, v)
-      }
-
-    // These three used to be lazy -- presumably for performance reasons. But lazy values
-    // used inside a function are only evaluated at evaluation time. Maybe we should evalute
-    // them in each of the 4 cases below... 
-    val scopeDef     = ValDef(NoMods, _scope, _scala_xml_NamespaceBinding, Ident(_tmpscope))
-    val tmpScopeDef  = ValDef(Modifiers(MUTABLE), _tmpscope, _scala_xml_NamespaceBinding, Ident(_scope))
-    val metadataDef  = ValDef(Modifiers(MUTABLE), _md, _scala_xml_MetaData, _scala_xml_Null)
-    val makeSymbolicAttrs = if (!attributes.isEmpty) Ident(_md) else _scala_xml_Null
-
-    val (attrResult, nsResult) =
-      (attributes.isEmpty, namespaces.isEmpty) match {
-        case (true ,  true)   => ((_: Tree) => Nil, (_: Tree) => Nil)
-        case (true , false)   => ((_: Tree) => scopeDef :: Nil, (x: Tree) => tmpScopeDef :: namespaces.map(_(x)))
-        case (false,  true)   => ((_: Tree) => metadataDef :: attributes.map(_(null)), (_: Tree) => Nil)
-        case (false, false)   => ((_: Tree) => scopeDef :: metadataDef :: attributes.map(_(null)), (x: Tree) => tmpScopeDef :: namespaces.map(_(null)))
-      }
-
-    val body = mkXML(
-      pos,
-      false,
-      const(pre),
-      const(newlabel),
-      makeSymbolicAttrs,
-      Ident(_scope),
-      args
-    )
-
-    buf_&++(atPos(pos)( Block(nsResult(null), Block(attrResult(null), body(null))) ))
+    atPos[Tree](pos) _ compose
+      apply(pos, _endElement) compose
+      compose(args) compose
+      compose(attributes.reverse) compose
+      apply(pos, _startElement, optional(pre), const(newlabel)) compose
+      compose(bindings)
   }
 }

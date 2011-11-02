@@ -1,6 +1,4 @@
-typed-xml-scala-processing-instruction-4.scala:2: error: type mismatch;
- found   : String("hello")
- required: scala.xml.XMLUnmarshaller
-  <?scala { "hello" } ?>
-            ^
+typed-xml-scala-processing-instruction-4.scala:2: error: in XML literal: scala processing instructions can only appear at start of XML literal
+  <element><?scala { scala.xml.ScalaXMLUnmarshaller } ?></element>
+                   ^
 one error found

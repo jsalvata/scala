@@ -116,7 +116,7 @@ object Predef extends LowPriorityImplicits {
 
   // Apparently needed for the xml library
   val $scope = scala.xml.TopScope
-  <?scala { new scala.xml.factory.SymbolicXMLUnmarshaller } ?>
+  <?scala { scala.xml.ScalaXMLUnmarshaller } ?>
  
   // Deprecated
 

@@ -1,3 +1,3 @@
 class Test {
-  <?scala { "hello" } ?>
+  <element><?scala { scala.xml.ScalaXMLUnmarshaller } ?></element>
 }
