@@ -7,7 +7,7 @@ package scala.tools.nsc
 package ast.parser
 
 import scala.collection.mutable
-import mutable.{ Buffer, ArrayBuffer, ListBuffer }
+import mutable.{ Buffer, ArrayBuffer, ListBuffer, Map }
 import scala.util.control.ControlThrowable
 import scala.tools.nsc.util.{SourceFile,CharArrayReader}
 import scala.xml.{ Text, TextBuffer }
@@ -315,10 +315,7 @@ trait MarkupParsers {
         xEndTag(qname)
         debugLastStartElement.pop
         val pos = r2p(start, start, curOffset)
-        qname match {
-          case "xml:group" => handle.group(pos, ts)
-          case _ => handle.element(pos, qname, attrMap, ts)
-        }
+        handle.element(pos, qname, attrMap, ts)
       }
     }
 
@@ -437,7 +434,7 @@ trait MarkupParsers {
     def xScalaPatterns: List[ElementType] = {
       val start= curOffset;
       val patterns= escapeToScala(parser.seqPatterns(), "pattern")
-      patterns.map(handle.scalaPattern(r2p(start, start, curOffset), _))
+      patterns.map(handle.scalaPatterns(r2p(start, start, curOffset), _))
     }
 
     def reportSyntaxError(pos: Int, str: String) = parser.syntaxError(pos, str)
@@ -493,7 +490,7 @@ trait MarkupParsers {
         debugLastStartElement.pop
       }
       
-      handle.pattern(r2p(start, start, curOffset), qname, ts)
+      handle.pattern(r2p(start, start, curOffset), qname, Map.empty, ts)
     }
   } /* class MarkupParser */
 }

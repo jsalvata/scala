@@ -1,157 +1,228 @@
 package scala.xml
 
+/**
+ * This unmarshaller supports XML literals compatible with the in-language XML
+ * support prior to the introduction of unmarshallers.
+ * 
+ * It was built by transforming the grammar of the sequence of calls generated
+ * by the compiler (which can be derived from the XmlExpr grammar in the Scala
+ * Language Specification) into a regular tree grammar
+ * (see http://wam.inrialpes.fr/courses/PG-MoSIG10/tree-grammars.pdf for an
+ * introduction) in Greibach Normal Form -- i.e., with all productions in form:
+ * 
+ * A ::= a
+ * A ::= bB
+ *  or
+ * A ::= c[C]D
+ *
+ * A class is then defined for each non-terminal (A, B, C...), with a method
+ * for each production:
+ *
+ * `A ::= yB` translates to a method "y" which returns a value of class B.
+ *
+ * `A ::= y[C]D` translates to a method "y" which returns a value of
+ *            a class C or, typically, an anonymous subclass of C,
+ *            which knows how to return a D on its end productions.
+ *
+ * `A ::= a`  is an end production, and translates to a method "a" which 
+ *            returns whatever its outer class told it to or, for the start 
+ *            symbol, returns the desired XML literal.
+ *
+ * A method startS is defined to obtain an object of class S corresponding to
+ * the grammar's start symbol.
+ * 
+ * @author Jordi Salvat i Alabart
+ */
 object ScalaXMLUnmarshaller extends XMLUnmarshaller {
 
-  def startDocument()= new StartUnmarshaller()
+  /**
+   * The initial symbol for the XmlExpr grammar
+   */
+  def startXmlExpr()= new XmlExpr()
 
-  trait NamespaceHandler {
-    this_handler =>
+  /**
+   * The initial symbol for the XmlPattern grammar
+   */
+  def startXmlPattern() = new ElementPattern()
+ 
+  /** 
+   * This class implements the production
+   *   XmlExpr := XmlContent Elements0
+   * which explodes into:
+   *
+   * XmlExpr ::= sTag[Element] Elements0
+   * XmlExpr ::= charData Elements0 // this implements `XmlExpr ::= CData Elements0` by ignoring cdStart and cdEnd
+   * XmlExpr ::= pi Elements0
+   * XmlExpr ::= comment Elements0
+   *
+   * TODO: review scaladoc formatting.
+   */
+  class XmlExpr {
+    this_xmlExpr =>
 
-    protected var scope: NamespaceBinding 
-
-    def startPrefixMapping(prefix: Option[String]) = new BufferedUnmarshaller {
-      def embeddedExpression(expression: Any) = expression match {
-        case str: String => next(new Text(str))
-        case _ => next(expression)
-      }
-      def endPrefixMapping(): this_handler.type = {
-        scope = new NamespaceBinding(prefix.orNull, buf.map(_.toString).fold("")(_+_), scope)
-        this_handler
-      }
-    }
-  }
-
-  /** Unmarshaller for XmlExpr (see ScalaReference 10.1)
-    */
-  class StartUnmarshaller extends ElementPattern with NamespaceHandler {
-    this_start =>
-
-    override protected var scope: NamespaceBinding= TopScope
-
-    private def next[N <: Node](node: N) = new FirstNodeUnmarshaller[N](node)
+    private def next[N <: Node](node: N) = new Elements0[N](node)
   
-    // Some of these are repeated, but the generic solution I found was much worse 
-    def startCDATA() = this // ignore
-    def characters(text: String) = next(new Text(text))
-    def processingInstruction(target: String, text: String) = next(new ProcInstr(target, text))
+    def sTag(qName: String) = new Element(qName, TopScope) {
+      def eTag() = this_xmlExpr.next(createElement)
+    }
+    def cdStart() = this // ignore
+    def pi(target: String, text: String) = next(new ProcInstr(target, text))
+    def charData(text: String) = next(new Text(text))
     def comment(text: String) = next(new Comment(text))
-  
-    def unparsed(str: String) = next(new Unparsed(str))
-    def startGroup() = new ContentUnmarshaller(scope) {
-      def endGroup() = this_start.next(new Group(buf))
-    }
-    def startElement(prefix: Option[String], localName: String) =
-        new ElementUnmarshaller(prefix, localName, scope) {
-      def endElement() = this_start.next(createElement)
-    }
   }
 
-  /** Unmarshaller for XmlContent.
-    */
-  class FirstNodeUnmarshaller[N <: Node](node: N) extends ElementPattern with NamespaceHandler {
-    this_firstNode =>
+  /**
+   * This class implements the productions:
+   *
+   * (XmlContent) Elements0 ::= endXmlExpr
+   *   returns specific subtype of Node corresponding to XmlContent
+   * 
+   * Elements0 ::= sTag[Element] Elements
+   */
+  class Elements0[N <: Node](node: N) {
+    this_xmlContent =>
 
-    override protected var scope: NamespaceBinding= TopScope
-
-    def endDocument() = node
+    def endXmlExpr() = node
   
-    private def next(newElement: Node) = new SeqUnmarshaller(node, newElement)
-
-    // Some of these are repeated, but the generic solution I found was much worse 
-    def endCDATA() = this // ignore
-
-    def unparsed(str: String) = next(new Unparsed(str))
-    def startGroup() = new ContentUnmarshaller(scope) {
-      def endGroup() = this_firstNode.next(new Group(buf))
+    def sTag(qName: String) = new Element(qName, TopScope) {
+      def eTag() = new Elements(node, createElement)
     }
-    def startElement(prefix: Option[String], localName: String) =
-        new ElementUnmarshaller(prefix, localName, scope) {
-      def endElement() = this_firstNode.next(createElement)
-    }
+    def cdEnd() = this // ignore
   }
 
-  /** Unmarshaller for XmlContent {Element}
-    */
-  class SeqUnmarshaller(node1: Node, node2: Node) extends ContentUnmarshaller(TopScope) {
+  /**
+   * This class implements the productions:
+   *
+   * (xmlContent element...) Elements ::= endXmlExpr
+   *   returns Seq[Node]
+   * 
+   * Elements ::= startElement[Element] Elements
+   * 
+   * The implementation of the later reuses Content, which includes other
+   * productions, but those are never used because the parser limits it.
+   */
+  class Elements(node1: Node, node2: Node) extends Content {
     buf &+ node1
     buf &+ node2
+    override protected var scope: NamespaceBinding= TopScope
 
-    def endDocument() = buf.toList
+    def endXmlExpr() = buf.toList
   }
 
-  /** Unmarshaller for the content of an Element.
-    */
-  class ContentUnmarshaller(parentScope: NamespaceBinding) extends BufferedUnmarshaller with ElementPattern with NamespaceHandler {
+  /**
+   * This class implements the productions:
+   *
+   * Content ::= scalaExpr Content
+   * Content ::= startElement[Element] Content
+   * Content ::= pi Content
+   * Content ::= comment Content
+   * 
+   * And also, via BufferedUnmarshaller:
+   * 
+   * Content ::= charData Content
+   * Content ::= entityRef Content
+   * Content ::= CDSect Content // by ignoring cdStart and cdEnd
+   */
+  abstract class Content extends BufferedUnmarshaller {
     this_content =>
-      
-    override protected var scope: NamespaceBinding= parentScope
 
-    override protected def next(newElement: Any): this.type = {
-      scope= parentScope
-      super.next(newElement)
+    protected var scope: NamespaceBinding
+
+    def scalaExpr(expression: Any): this.type = next(expression)
+    // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
+    // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
+    def sTag[E >: this.type <: this.type](qName: String) = new Element(qName, scope) {
+      def eTag(): E = this_content.next(createElement)
     }
-
-    // Some of these are repeated, but the generic solution I found was much worse 
+    def pi(target: String, text: String): this.type = next(new ProcInstr(target, text))
     def comment(text: String): this.type = next(new Comment(text))
-    def startCDATA(): this.type = this // ignore
-    def endCDATA(): this.type = this // ignore
-    def processingInstruction(target: String, text: String): this.type = next(new ProcInstr(target, text))
 
-    def embeddedExpression(expression: Any): this.type = next(expression)
-    
-    def unparsed(str: String): this.type = next(new Unparsed(str))
-    // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
-    // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
-    def startGroup[E >: this.type <: this.type]() = new ContentUnmarshaller(scope) {
-      def endGroup(): E = this_content.next(new Group(buf))
-    }
-    // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
-    // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
-    def startElement[E >: this.type <: this.type](prefix: Option[String], localName: String) =
-        new ElementUnmarshaller(prefix, localName, scope) {
-      def endElement(): E = this_content.next(createElement)
-    }
+    def cdStart(): this.type = this // ignore
+    def cdEnd(): this.type = this // ignore
   }
 
-  /** Unmarshaller for Element (see ScalaReference 10.1)
-    */
-  abstract class ElementUnmarshaller(prefix: Option[String], localName: String, scope: NamespaceBinding) extends ContentUnmarshaller(scope) {
+  /**
+   * This class implements the production:
+   * 
+   * Element ::= startAttribute[Attribute] Element
+   * 
+   * and, via Content:
+   * 
+   * Element ::= scalaExpr Element
+   * Element ::= startElement[Element] Element
+   * Element ::= pi Element
+   * Element ::= comment Element
+   * Element ::= charData Element
+   * Element ::= entityRef Element
+   * Element ::= CDSect Element
+   * 
+   * Note this would allow startAttribute after the first Content -- but the
+   * parser will never produce such a sequence of calls. This may be a bad idea,
+   * though, because it has caused me trouble implementing scope handling.
+   */
+  abstract class Element(qname: String, parentScope: NamespaceBinding) extends Content {
     this_element =>
 
-    private var attributes: MetaData = Null
+    private var attributes= identity[MetaData] _
+    override protected var scope: NamespaceBinding= parentScope
 
-    def createElement = new Elem(prefix.orNull, localName, attributes, scope, buf: _*)
+    def createElement = {
+      splitPrefix(qname) match {
+        //case (Some("xml"), "unparsed") => new Unparsed(buf.text)
+        //case (Some("xml"), "group") => new Group(buf) // TODO: recover these
+        case (prefix, localName) => new Elem(prefix.orNull, localName, attributes(Null), scope, buf: _*)
+      }
+    }
 
-    def startAttribute(prefix: Option[String], localName: String) =
-      new AttributeUnmarshaller[this.type](prefix, localName)
+    def startAttribute(qName: String) = new Attribute[this.type](qName)
 
+    /**
+     * This class implements the production:
+     * 
+     * Attribute ::= scalaExpr AnyRef
+     * 
+     * And also, via BufferedUnmarshaller:
+     *
+     * Attribute ::= charData Attribute
+     * Attribute ::= entityRef Attribute
+     */
     // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
     // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
-    class AttributeUnmarshaller[E >: this.type](prefix: Option[String], localName: String) extends BufferedUnmarshaller {
-      def storeAttribute(value: Seq[Node]) {
-        this_element.attributes= prefix match {
-          case Some(ns) => new PrefixedAttribute(ns, localName, value, this_element.attributes)
-          case None =>  new UnprefixedAttribute(localName, value, this_element.attributes)
+    class Attribute[E >: this.type <: this.type](qName: String) extends BufferedUnmarshaller {
+      def addAttribute(attribute: MetaData => MetaData) = {
+        this_element.attributes = this_element.attributes compose attribute
+      }
+
+      /**
+       * Process this attribute and register it as a plain attribute or as a
+       * namespace binding.
+       */
+      def processAttribute(value: Seq[Node]) {
+        splitPrefix(qName) match {
+          case (Some("xmlns"), prefix) => scope= new NamespaceBinding(prefix, value.text, scope)
+          case (None, "xmlns") => scope= new NamespaceBinding(null, value.text, scope)
+          case (Some(ns), localName) => addAttribute(new PrefixedAttribute(ns, localName, value, _))
+          case (None, localName) =>  addAttribute(new UnprefixedAttribute(localName, value, _))
         }
       }
 
-      def embeddedExpression(expression: String) = {
+      def scalaExpr(expression: String) = {
         val value= if (expression != null) Text(expression) else null: NodeSeq
-        storeAttribute(value)
+        processAttribute(value)
         new AnyRef {
           def endAttribute(): E = this_element
         }
       }
 
-      def embeddedExpression(expression: Option[Seq[Node]]) = {
-        storeAttribute(expression.orNull)
+      def scalaExpr(expression: Option[Seq[Node]]) = {
+        processAttribute(expression.orNull)
         new AnyRef {
           def endAttribute(): E = this_element
         }
       }
 
-      def embeddedExpression(expression: Seq[Node]) = {
-        storeAttribute(expression)
+      def scalaExpr(expression: Seq[Node]) = {
+        processAttribute(expression)
         new AnyRef {
           def endAttribute(): E = this_element
         }
@@ -159,15 +230,23 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
 
       def endAttribute(): E = {
         buf.length match { // for backward compatibility -- this switch was in parseAttribute
-          case 0 => storeAttribute(Nil)
-          case 1 => storeAttribute(buf.head)
-          case _ => storeAttribute(buf)
+          case 0 => processAttribute(Nil)
+          case 1 => processAttribute(buf.head)
+          case _ => processAttribute(buf)
         }
         this_element
       }
     }
   }
 
+  /**
+   * This class supports productions "X" with a sequence of content
+   * (Content, Element, and Attribute), and defines the following
+   * productions common to them:
+   * 
+   * X ::= charData X
+   * X ::= entityRef X
+   */
   abstract class BufferedUnmarshaller {
     protected val buf= new NodeBuffer()  
 
@@ -176,19 +255,32 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
       this
     }
 
-    def characters(text: String): this.type = {
+    def charData(text: String): this.type = {
       if (text != "" ) next(new Text(text)) // for backward compatiblity -- the conditional was in makeXMLseq
       else this
     }
-    def skippedEntity(name: String): this.type = next(new EntityRef(name))
+    def entityRef(name: String): this.type = next(new EntityRef(name))
   }
 
-  trait ElementPattern {
-    val elementPattern = new AnyRef {
-      def unapplySeq(n: Node) = n match {
-        case _: SpecialNode | _: Group  => None
-        case _                          => Some((n.prefix, n.label, n.attributes, n.scope, n.child))
+  /**
+   * ElementPattern := 
+   */
+  class ElementPattern {
+    def sTag(qName: String) = this
+    def eTag()= this
+    def scalaExpr(expression: Any) = this
+
+    def endXmlPattern = new AnyRef {
       }
-    }
   }  
+  def unapplySeq(n: Node) = n match {
+    case _: SpecialNode | _: Group  => None
+    case _ => Some((n.prefix, n.label, n.attributes, n.scope, n.child))
+  }
+
+  /** Returns (Some(prefix) | None, rest) based on position of ':' */
+  private def splitPrefix(name: String): (Option[String], String) = name.split(":", 2) match {
+    case Array(pre, rest)  => (Some(pre), rest)
+    case _                 => (None, name)
+  }
 }
