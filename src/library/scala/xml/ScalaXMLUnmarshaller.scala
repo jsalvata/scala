@@ -308,12 +308,12 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     case _                 => (None, name)
   }
   
-  private def elementQName(methodName: String) = qName(methodName, "sTag_")
+  private def elementQName(methodName: String) = qName(methodName, "sTag")
 
-  private def attributeQName(methodName: String) = qName(methodName, "startAttribute_") 
+  private def attributeQName(methodName: String) = qName(methodName, "startAttribute") 
   
   private def qName(methodName: String, prefix: String) = methodName.split("_", 2) match {
-    case Array(`methodName`, qName) => qName
-    case _ => throw new java.lang.AssertionError(methodName+" is not a valid "+methodName+" method name.")
+    case Array(prefix, qName) => qName
+    case _ => throw new java.lang.AssertionError(methodName+" is not a valid "+prefix+" method name.")
   } 
 }
