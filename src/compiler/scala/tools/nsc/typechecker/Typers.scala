@@ -3624,7 +3624,7 @@ trait Typers extends Modes with Adaptations with PatMatVirtualiser {
 
           // try to expand according to Dynamic rules.
 
-          if (settings.Xexperimental.value && (qual.tpe.widen.typeSymbol isNonBottomSubClass DynamicClass)) {
+          if (qual.tpe.widen.typeSymbol isNonBottomSubClass DynamicClass) {
             var dynInvoke = Apply(Select(qual, nme.applyDynamic), List(Literal(Constant(name.decode))))
             context.tree match {
               case Apply(tree1, args) if tree1 eq tree => 
@@ -3632,7 +3632,7 @@ trait Typers extends Modes with Adaptations with PatMatVirtualiser {
               case _ => 
                 dynInvoke = Apply(dynInvoke, List())
             }
-            return typed1(util.trace("dynatype: ")(dynInvoke), mode, pt)
+            return typed1(dynInvoke, mode, pt)
           }
                   
           if (settings.debug.value) {
