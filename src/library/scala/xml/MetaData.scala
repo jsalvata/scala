@@ -26,10 +26,12 @@ object MetaData {
    *
    * Duplicates can be removed with `normalize`.
    */
+  def concatenate(attribs: MetaData, new_tail: MetaData): MetaData = concatenateTailRec(attribs, new_tail)
+
   @tailrec
-  def concatenate(attribs: MetaData, new_tail: MetaData): MetaData =
+  private def concatenateTailRec(attribs: MetaData, new_tail: MetaData): MetaData =
     if (attribs eq Null) new_tail
-    else concatenate(attribs.next, attribs copy new_tail)
+    else concatenateTailRec(attribs.next, attribs copy new_tail)
 
   /**
    * returns normalized MetaData, with all duplicates removed and namespace prefixes resolved to
