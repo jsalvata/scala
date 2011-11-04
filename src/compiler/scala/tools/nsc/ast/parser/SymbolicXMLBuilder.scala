@@ -39,7 +39,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     // The following are named after Scala/XML grammar non-terminals:
     val _startXmlExpr:  NameType = "startXmlExpr"
     val _endXmlExpr:    NameType = "endXmlExpr"
-    val _sTag:          NameType = "sTag" // also called for sTagP
+    def _sTag(qName: String): NameType = "sTag_"+qName // also called for sTagP
     val _eTag:          NameType = "eTag" // also called for eTagP
     val _charData:      NameType = "charData" // also called for CData
     val _comment:       NameType = "comment"
@@ -53,8 +53,10 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _startXmlPattern: NameType = "startXmlPattern"
     val _endXmlPattern: NameType = "endXmlPattern"
 
-    val _startAttribute:NameType = "startAttribute"
+    def _startAttribute(qName: String):NameType = "startAttribute_"+qName
     val _endAttribute:  NameType = "endAttribute"
+    val _startAttributes: NameType = "startAttributes"
+    val _endAttributes: NameType = "endAttributes"
   }
 
   private object xmltypes extends XMLTypeNames {
@@ -73,7 +75,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     _charData, _comment, _cdStart, _cdEnd, _pi,
     _entityRef, _scalaExpr, _scalaPatterns,
     _startXmlPattern, _endXmlPattern,
-    _startAttribute, _endAttribute}
+    _startAttribute, _endAttribute, _startAttributes, _endAttributes}
 
   // convenience methods 
   private def LL[A](x: A*): List[List[A]] = List(List(x:_*))
@@ -134,20 +136,22 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   }
 
   final def unparsed(pos: Position, str: String) =
-    apply(pos, _eTag) compose apply(pos, _charData, str) compose apply(pos, _sTag, "xml:unparsed")
+    apply(pos, _eTag) compose apply(pos, _charData, str) compose apply(pos, _sTag("xml:unparsed"))
 
   final def element(pos: Position, 
-                    qname: String, 
+                    qName: String, 
                     attrMap: mutable.Map[String, Tree => Tree], 
                     children: Seq[Tree => Tree]): Tree => Tree = {
 
     val attributes = for ((name, value) <- attrMap.toSeq) yield
-      apply(pos, _endAttribute) compose value compose apply(pos, _startAttribute, name)
+      apply(pos, _endAttribute) compose value compose apply(pos, _startAttribute(name))
 
     apply(pos, _eTag) compose
       compose(children) compose
+      apply(pos, _endAttributes) compose
       compose(attributes) compose
-      apply(pos, _sTag, const(qname))
+      apply(pos, _startAttributes) compose
+      apply(pos, _sTag(qName))
   }
 
   final def scalaPatterns(pos: Position, expr: Tree) = apply(pos, _scalaPatterns, expr)

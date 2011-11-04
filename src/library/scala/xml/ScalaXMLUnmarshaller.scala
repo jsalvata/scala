@@ -57,13 +57,19 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
    *
    * TODO: review scaladoc formatting.
    */
-  class XmlExpr {
+  class XmlExpr extends Dynamic {
     this_xmlExpr =>
 
     private def next[N <: Node](node: N) = new Elements0[N](node)
   
-    def sTag(qName: String) = new Element(qName, TopScope) {
+    def applyDynamic(name: String)() = new Element(elementQName(name), TopScope) {
       def eTag() = this_xmlExpr.next(createElement)
+    }
+    def `sTag_xml:group`() = new Element("xml:group", TopScope) {
+      def eTag() = this_xmlExpr.next(createGroup)
+    }
+    def `sTag_xml:unparsed`() = new Element("xml:unparsed", TopScope) {
+      def eTag() = this_xmlExpr.next(createUnparsed)
     }
     def cdStart() = this // ignore
     def pi(target: String, text: String) = next(new ProcInstr(target, text))
@@ -79,13 +85,19 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
    * 
    * Elements0 ::= sTag[Element] Elements
    */
-  class Elements0[N <: Node](node: N) {
+  class Elements0[N <: Node](node: N) extends Dynamic {
     this_xmlContent =>
 
     def endXmlExpr() = node
   
-    def sTag(qName: String) = new Element(qName, TopScope) {
+    def applyDynamic(name: String)() = new Element(elementQName(name), TopScope) {
       def eTag() = new Elements(node, createElement)
+    }
+    def `sTag_xml:group`() = new Element("xml:group", TopScope) {
+      def eTag() = new Elements(node, createGroup)
+    }
+    def `sTag_xml:unparsed`() = new Element("xml:unparsed", TopScope) {
+      def eTag() = new Elements(node, createUnparsed)
     }
     def cdEnd() = this // ignore
   }
@@ -123,7 +135,7 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
    * Content ::= entityRef Content
    * Content ::= CDSect Content // by ignoring cdStart and cdEnd
    */
-  abstract class Content extends BufferedUnmarshaller {
+  abstract class Content extends BufferedUnmarshaller with Dynamic {
     this_content =>
 
     protected var scope: NamespaceBinding
@@ -131,8 +143,14 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     def scalaExpr(expression: Any): this.type = next(expression)
     // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
     // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
-    def sTag[E >: this.type <: this.type](qName: String) = new Element(qName, scope) {
+    def applyDynamic[E >: this.type <: this.type](name: String)() = new Element(elementQName(name), TopScope) {
       def eTag(): E = this_content.next(createElement)
+    }
+    def `sTag_xml:group`[E >: this.type <: this.type]() = new Element("xml:group", TopScope) {
+      def eTag() = this_content.next(createGroup)
+    }
+    def `sTag_xml:unparsed`[E >: this.type <: this.type]() = new Element("xml:unparsed", TopScope) {
+      def eTag() = this_content.next(createUnparsed)
     }
     def pi(target: String, text: String): this.type = next(new ProcInstr(target, text))
     def comment(text: String): this.type = next(new Comment(text))
@@ -144,8 +162,8 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
   /**
    * This class implements the production:
    * 
-   * Element ::= startAttribute[Attribute] Element
-   * 
+   * Element ::= startAttributes[Attributes] Element
+   *
    * and, via Content:
    * 
    * Element ::= scalaExpr Element
@@ -155,86 +173,92 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
    * Element ::= charData Element
    * Element ::= entityRef Element
    * Element ::= CDSect Element
-   * 
-   * Note this would allow startAttribute after the first Content -- but the
-   * parser will never produce such a sequence of calls. This may be a bad idea,
-   * though, because it has caused me trouble implementing scope handling.
    */
-  abstract class Element(qname: String, parentScope: NamespaceBinding) extends Content {
+  abstract class Element(qname: String, parentScope: NamespaceBinding) extends Content with Dynamic {
     this_element =>
 
     private var attributes= identity[MetaData] _
     override protected var scope: NamespaceBinding= parentScope
 
     def createElement = {
-      splitPrefix(qname) match {
-        //case (Some("xml"), "unparsed") => new Unparsed(buf.text)
-        //case (Some("xml"), "group") => new Group(buf) // TODO: recover these
-        case (prefix, localName) => new Elem(prefix.orNull, localName, attributes(Null), scope, buf: _*)
-      }
+      val (prefix, localName)= splitPrefix(qname)
+      new Elem(prefix.orNull, localName, attributes(Null), scope, buf: _*)
     }
+    def createGroup = new Group(buf)
+    def createUnparsed = new Unparsed(buf.text)
 
-    def startAttribute(qName: String) = new Attribute[this.type](qName)
+    def startAttributes[E >: this.type <: this.type]() = new Attributes {
+      def endAttributes(): E = this_element 
+    }
 
     /**
      * This class implements the production:
      * 
-     * Attribute ::= scalaExpr AnyRef
-     * 
-     * And also, via BufferedUnmarshaller:
-     *
-     * Attribute ::= charData Attribute
-     * Attribute ::= entityRef Attribute
+     * Attributes ::= startAttribute[Attribute] Attributes
      */
-    // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
-    // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
-    class Attribute[E >: this.type <: this.type](qName: String) extends BufferedUnmarshaller {
-      def addAttribute(attribute: MetaData => MetaData) = {
-        this_element.attributes = this_element.attributes compose attribute
-      }
+    class Attributes extends Dynamic {
+      this_attributes =>
+
+      def applyDynamic[E >: this.type <: this.type](name: String)() = new Attribute[E](attributeQName(name))
 
       /**
-       * Process this attribute and register it as a plain attribute or as a
-       * namespace binding.
+       * This class implements the production:
+       * 
+       * Attribute ::= scalaExpr AnyRef
+       * 
+       * And also, via BufferedUnmarshaller:
+       *
+       * Attribute ::= charData Attribute
+       * Attribute ::= entityRef Attribute
        */
-      def processAttribute(value: Seq[Node]) {
-        splitPrefix(qName) match {
-          case (Some("xmlns"), prefix) => scope= new NamespaceBinding(prefix, value.text, scope)
-          case (None, "xmlns") => scope= new NamespaceBinding(null, value.text, scope)
-          case (Some(ns), localName) => addAttribute(new PrefixedAttribute(ns, localName, value, _))
-          case (None, localName) =>  addAttribute(new UnprefixedAttribute(localName, value, _))
+      class Attribute[E >: this.type <: this.type](qName: String) extends BufferedUnmarshaller {
+        def addAttribute(attribute: MetaData => MetaData) = {
+          this_element.attributes = this_element.attributes compose attribute
         }
-      }
-
-      def scalaExpr(expression: String) = {
-        val value= if (expression != null) Text(expression) else null: NodeSeq
-        processAttribute(value)
-        new AnyRef {
-          def endAttribute(): E = this_element
+  
+        /**
+         * Process this attribute and register it as a plain attribute or as a
+         * namespace binding.
+         */
+        def processAttribute(value: Seq[Node]) {
+          splitPrefix(qName) match {
+            case (Some("xmlns"), prefix) => scope= new NamespaceBinding(prefix, value.text, scope)
+            case (None, "xmlns") => scope= new NamespaceBinding(null, value.text, scope)
+            case (Some(ns), localName) => addAttribute(new PrefixedAttribute(ns, localName, value, _))
+            case (None, localName) =>  addAttribute(new UnprefixedAttribute(localName, value, _))
+          }
         }
-      }
-
-      def scalaExpr(expression: Option[Seq[Node]]) = {
-        processAttribute(expression.orNull)
-        new AnyRef {
-          def endAttribute(): E = this_element
+  
+        def scalaExpr(expression: String) = {
+          val value= if (expression != null) Text(expression) else null: NodeSeq
+          processAttribute(value)
+          new AnyRef {
+            def endAttribute(): E = this_attributes
+          }
         }
-      }
-
-      def scalaExpr(expression: Seq[Node]) = {
-        processAttribute(expression)
-        new AnyRef {
-          def endAttribute(): E = this_element
+  
+        def scalaExpr(expression: Option[Seq[Node]]) = {
+          processAttribute(expression.orNull)
+          new AnyRef {
+            def endAttribute(): E = this_attributes
+          }
         }
-      }
-
-      def endAttribute(): E = {
-        buf.length match { // for backward compatibility -- this switch was in parseAttribute
-          case 0 => processAttribute(Nil)
-          case 1 => processAttribute(buf.head)
-          case _ => processAttribute(buf)
+  
+        def scalaExpr(expression: Seq[Node]) = {
+          processAttribute(expression)
+          new AnyRef {
+            def endAttribute(): E = this_attributes
+          }
         }
-        this_element
+  
+        def endAttribute(): E = {
+          buf.length match { // for backward compatibility -- this switch was in parseAttribute
+            case 0 => processAttribute(Nil)
+            case 1 => processAttribute(buf.head)
+            case _ => processAttribute(buf)
+          }
+          this_attributes
+        }
       }
     }
   }
@@ -283,4 +307,13 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     case Array(pre, rest)  => (Some(pre), rest)
     case _                 => (None, name)
   }
+  
+  private def elementQName(methodName: String) = qName(methodName, "sTag_")
+
+  private def attributeQName(methodName: String) = qName(methodName, "startAttribute_") 
+  
+  private def qName(methodName: String, prefix: String) = methodName.split("_", 2) match {
+    case Array(`methodName`, qName) => qName
+    case _ => throw new java.lang.AssertionError(methodName+" is not a valid "+methodName+" method name.")
+  } 
 }
