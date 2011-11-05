@@ -12,6 +12,7 @@ import xml.{ EntityRef, Text }
 import xml.XML.{ xmlns }
 import symtab.Flags.MUTABLE
 import scala.collection.mutable.ListBuffer
+import scala.reflect.NameTransformer
 
 /** This class builds instance of `Tree` that represent XML.
  *
@@ -39,7 +40,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     // The following are named after Scala/XML grammar non-terminals:
     val _startXmlExpr:  NameType = "startXmlExpr"
     val _endXmlExpr:    NameType = "endXmlExpr"
-    def _sTag(qName: String): NameType = "sTag_"+qName // also called for sTagP
+    def _sTag(qName: String): NameType = NameTransformer.encode("sTag_"+qName) // also called for sTagP
     val _eTag:          NameType = "eTag" // also called for eTagP
     val _charData:      NameType = "charData" // also called for CData
     val _comment:       NameType = "comment"
@@ -53,7 +54,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _startXmlPattern: NameType = "startXmlPattern"
     val _endXmlPattern: NameType = "endXmlPattern"
 
-    def _startAttribute(qName: String):NameType = "startAttribute_"+qName
+    def _startAttribute(qName: String):NameType = NameTransformer.encode("startAttribute_"+qName)
     val _endAttribute:  NameType = "endAttribute"
     val _startAttributes: NameType = "startAttributes"
     val _endAttributes: NameType = "endAttributes"

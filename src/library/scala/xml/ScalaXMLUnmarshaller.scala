@@ -141,16 +141,17 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     protected var scope: NamespaceBinding
 
     def scalaExpr(expression: Any): this.type = next(expression)
+
     // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
     // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
     def applyDynamic[E >: this.type <: this.type](name: String)() = new Element(elementQName(name), TopScope) {
       def eTag(): E = this_content.next(createElement)
     }
     def `sTag_xml:group`[E >: this.type <: this.type]() = new Element("xml:group", TopScope) {
-      def eTag() = this_content.next(createGroup)
+      def eTag(): E = this_content.next(createGroup)
     }
     def `sTag_xml:unparsed`[E >: this.type <: this.type]() = new Element("xml:unparsed", TopScope) {
-      def eTag() = this_content.next(createUnparsed)
+      def eTag(): E = this_content.next(createUnparsed)
     }
     def pi(target: String, text: String): this.type = next(new ProcInstr(target, text))
     def comment(text: String): this.type = next(new Comment(text))
@@ -182,9 +183,9 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
 
     def createElement = {
       val (prefix, localName)= splitPrefix(qname)
-      new Elem(prefix.orNull, localName, attributes(Null), scope, buf: _*)
+      new Elem(prefix.orNull, localName, attributes(Null), scope, buf.toList: _*)
     }
-    def createGroup = new Group(buf)
+    def createGroup = new Group(buf.toList)
     def createUnparsed = new Unparsed(buf.text)
 
     def startAttributes[E >: this.type <: this.type]() = new Attributes {
