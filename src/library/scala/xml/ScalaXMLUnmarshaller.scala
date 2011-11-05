@@ -8,28 +8,37 @@ package scala.xml
  * by the compiler (which can be derived from the XmlExpr grammar in the Scala
  * Language Specification) into a regular tree grammar
  * (see http://wam.inrialpes.fr/courses/PG-MoSIG10/tree-grammars.pdf for an
- * introduction) in Greibach Normal Form -- i.e., with all productions in form:
+ * introduction) with all productions in one of these forms:
  * 
  * A ::= a
  * A ::= bB
- *  or
- * A ::= c[C]D
+ * A ::= e[E]F
+ * A ::= CD
  *
+ * It is known that it is always possible to write a Regular Tree Grammar 
+ * in this form (or even the more restrictive Chomsky Normal Form).
+ * 
  * A class is then defined for each non-terminal (A, B, C...), with a method
  * for each production:
  *
- * `A ::= yB` translates to a method "y" which returns a value of class B.
- *
- * `A ::= y[C]D` translates to a method "y" which returns a value of
- *            a class C or, typically, an anonymous subclass of C,
- *            which knows how to return a D on its end productions.
- *
  * `A ::= a`  is an end production, and translates to a method "a" which 
- *            returns whatever its outer class told it to or, for the start 
- *            symbol, returns the desired XML literal.
+ *            returns whatever its outer class told it to or, if it's outer
+ *            class is the one for the start symbol, returns the desired XML
+ *            literal.
  *
- * A method startS is defined to obtain an object of class S corresponding to
- * the grammar's start symbol.
+ * `A ::= bB` translates to a method "b" which returns a value of class B.
+ *
+ * `A ::= e[E]F` translates to a method "e" which returns a value of
+ *            a class E or, typically, an anonymous subclass of C,
+ *            which knows how to return an F on its end productions.
+ *
+ * `A ::= CD` translates to the class for A extending that for C and
+ *            providing it with a mechanism, typically a `next` method,
+ *            to return a D on its end productions.
+ *
+ * The unmarshaller itself corresponds to the grammar's start symbol.
+ *
+ * TODO: review scaladoc formatting.
  * 
  * @author Jordi Salvat i Alabart
  */
@@ -46,134 +55,113 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
   def startXmlPattern() = new ElementPattern()
  
   /** 
-   * This class implements the production
-   *   XmlExpr := XmlContent Elements0
-   * which explodes into:
-   *
-   * XmlExpr ::= sTag[Element] Elements0
-   * XmlExpr ::= charData Elements0 // this implements `XmlExpr ::= CData Elements0` by ignoring cdStart and cdEnd
-   * XmlExpr ::= pi Elements0
-   * XmlExpr ::= comment Elements0
-   *
-   * TODO: review scaladoc formatting.
+   * XmlExpr := XmlContent Elements0
    */
-  class XmlExpr extends Dynamic {
-    this_xmlExpr =>
+  class XmlExpr extends XmlContent with ContinuationPassingNodeFactory {
+    override protected var scope: NamespaceBinding= TopScope
+    override protected type E[N <: Node]= Elements0[N]
+    override protected def next[N <: Node](node: N) = new Elements0[N](node)
+  }
 
-    private def next[N <: Node](node: N) = new Elements0[N](node)
-  
-    def applyDynamic(name: String)() = new Element(elementQName(name), TopScope) {
-      def eTag() = this_xmlExpr.next(createElement)
-    }
-    def `sTag_xml:group`() = new Element("xml:group", TopScope) {
-      def eTag() = this_xmlExpr.next(createGroup)
-    }
-    def `sTag_xml:unparsed`() = new Element("xml:unparsed", TopScope) {
-      def eTag() = this_xmlExpr.next(createUnparsed)
-    }
-    def cdStart() = this // ignore
-    def pi(target: String, text: String) = next(new ProcInstr(target, text))
+  /**
+   * Objects of this trait produce nodes which must be processed
+   * in a common way (the `next` method) but return a type dependent on the
+   * type of the node created.
+   */
+  trait ContinuationPassingNodeFactory {
+    protected type E[_ <: Node]
+    protected def next[N <: Node](node: N): E[N]
+  }
+
+  /**
+   * This class implements the productions:
+   *
+   * XmlContent ::= cdStart XmlContent // ignore cdStart
+   * XmlContent ::= charData // this implements `XmlExpr ::= CData` by ignoring cdStart and, elsewhere, cdEnd too
+   * XmlContent ::= cdEnd XmlContent // ignore cdEnd -- for when XmlContent is the "elsewhere"
+   * XmlContent ::= pi
+   * XmlContent ::= comment
+   */
+  trait XmlContent extends RealElement {
+    this: ContinuationPassingNodeFactory =>
+    def cdStart(): this.type = this // ignore
     def charData(text: String) = next(new Text(text))
+    def cdEnd(): this.type = this // ignore
+    def pi(target: String, text: String) = next(new ProcInstr(target, text))
     def comment(text: String) = next(new Comment(text))
+  }
+
+  /**
+   * RealElement ::= sTag[Element]
+   *   including the (undocumented) special sTags xml:group and xml:unparsed, which
+   *   have different semantics (must create and return a different type of node).
+   */
+  trait RealElement extends Dynamic {
+    outer: ContinuationPassingNodeFactory =>
+      
+    protected var scope: NamespaceBinding
+    
+    def applyDynamic(name: String)() = new Element(elementQName(name), scope) {
+      def eTag() = outer.next(createElement)
+    }
+    def `sTag_xml:group`() = new Element("xml:group", scope) {
+      def eTag() = outer.next(createGroup)
+    }
+    def `sTag_xml:unparsed`() = new Element("xml:unparsed", scope) {
+      def eTag() = outer.next(createUnparsed)
+    }    
   }
 
   /**
    * This class implements the productions:
    *
    * (XmlContent) Elements0 ::= endXmlExpr
-   *   returns specific subtype of Node corresponding to XmlContent
-   * 
-   * Elements0 ::= sTag[Element] Elements
+   *   returns specific type of Node corresponding to XmlContent
+   *
+   * Elements0 ::= cdEnd Elements0 // ignore cdEnd (see comments in XmlContent) 
+   * Elements0 ::= RealElement Elements
    */
-  class Elements0[N <: Node](node: N) extends Dynamic {
-    this_xmlContent =>
+  class Elements0[N <: Node](node: N) extends RealElement with ContinuationPassingNodeFactory {
+    override protected var scope: NamespaceBinding= TopScope
+    override type E[N <: Node]= Elements
+    override protected def next[N <: Node](newNode: N) = new Elements(node, newNode)
 
     def endXmlExpr() = node
-  
-    def applyDynamic(name: String)() = new Element(elementQName(name), TopScope) {
-      def eTag() = new Elements(node, createElement)
-    }
-    def `sTag_xml:group`() = new Element("xml:group", TopScope) {
-      def eTag() = new Elements(node, createGroup)
-    }
-    def `sTag_xml:unparsed`() = new Element("xml:unparsed", TopScope) {
-      def eTag() = new Elements(node, createUnparsed)
-    }
-    def cdEnd() = this // ignore
+    def cdEnd(): this.type = this // ignore
   }
 
   /**
-   * This class implements the productions:
-   *
    * (xmlContent element...) Elements ::= endXmlExpr
    *   returns Seq[Node]
    * 
-   * Elements ::= startElement[Element] Elements
-   * 
-   * The implementation of the later reuses Content, which includes other
-   * productions, but those are never used because the parser limits it.
+   * Elements ::= RealElement Elements
    */
-  class Elements(node1: Node, node2: Node) extends Content {
+  class Elements(node1: Node, node2: Node) extends RealElement with BufferedUnmarshaller {
+    override protected var scope: NamespaceBinding= TopScope
     buf &+ node1
     buf &+ node2
-    override protected var scope: NamespaceBinding= TopScope
 
     def endXmlExpr() = buf.toList
   }
 
   /**
-   * This class implements the productions:
-   *
-   * Content ::= scalaExpr Content
-   * Content ::= startElement[Element] Content
-   * Content ::= pi Content
-   * Content ::= comment Content
-   * 
-   * And also, via BufferedUnmarshaller:
-   * 
    * Content ::= charData Content
+   * Content ::= XmlContent Content
    * Content ::= entityRef Content
-   * Content ::= CDSect Content // by ignoring cdStart and cdEnd
+   * Content ::= scalaExpr Content
    */
-  abstract class Content extends BufferedUnmarshaller with Dynamic {
-    this_content =>
-
-    protected var scope: NamespaceBinding
-
+  trait Content extends XmlContent with BufferedUnmarshaller {
+    override def charData(text: String): this.type = {
+      if (text != "" ) next(new Text(text)) // for backward compatiblity -- the conditional was in makeXMLseq
+      else this
+    }
+    def entityRef(name: String): this.type = next(new EntityRef(name))
     def scalaExpr(expression: Any): this.type = next(expression)
-
-    // TODO: Type parameter E is a workaround for SI-5130. Remove it when that is fixed:
-    // https://issues.scala-lang.org/browse/SI-5130?focusedCommentId=55187#comment-55187
-    def applyDynamic[E >: this.type <: this.type](name: String)() = new Element(elementQName(name), TopScope) {
-      def eTag(): E = this_content.next(createElement)
-    }
-    def `sTag_xml:group`[E >: this.type <: this.type]() = new Element("xml:group", TopScope) {
-      def eTag(): E = this_content.next(createGroup)
-    }
-    def `sTag_xml:unparsed`[E >: this.type <: this.type]() = new Element("xml:unparsed", TopScope) {
-      def eTag(): E = this_content.next(createUnparsed)
-    }
-    def pi(target: String, text: String): this.type = next(new ProcInstr(target, text))
-    def comment(text: String): this.type = next(new Comment(text))
-
-    def cdStart(): this.type = this // ignore
-    def cdEnd(): this.type = this // ignore
   }
 
   /**
-   * This class implements the production:
-   * 
    * Element ::= startAttributes[Attributes] Element
-   *
-   * and, via Content:
-   * 
-   * Element ::= scalaExpr Element
-   * Element ::= startElement[Element] Element
-   * Element ::= pi Element
-   * Element ::= comment Element
-   * Element ::= charData Element
-   * Element ::= entityRef Element
-   * Element ::= CDSect Element
+   * Element ::= Content Element
    */
   abstract class Element(qname: String, parentScope: NamespaceBinding) extends Content with Dynamic {
     this_element =>
@@ -193,8 +181,6 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     }
 
     /**
-     * This class implements the production:
-     * 
      * Attributes ::= startAttribute[Attribute] Attributes
      */
     class Attributes extends Dynamic {
@@ -203,16 +189,11 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
       def applyDynamic[E >: this.type <: this.type](name: String)() = new Attribute[E](attributeQName(name))
 
       /**
-       * This class implements the production:
-       * 
-       * Attribute ::= scalaExpr AnyRef
-       * 
-       * And also, via BufferedUnmarshaller:
-       *
        * Attribute ::= charData Attribute
        * Attribute ::= entityRef Attribute
+       * Attribute ::= scalaExpr AnyRef
        */
-      class Attribute[E >: this.type <: this.type](qName: String) extends BufferedUnmarshaller {
+      class Attribute[A >: this.type <: this.type](qName: String) extends BufferedUnmarshaller {
         def addAttribute(attribute: MetaData => MetaData) = {
           this_element.attributes = this_element.attributes compose attribute
         }
@@ -234,25 +215,25 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
           val value= if (expression != null) Text(expression) else null: NodeSeq
           processAttribute(value)
           new AnyRef {
-            def endAttribute(): E = this_attributes
+            def endAttribute(): A = this_attributes
           }
         }
   
         def scalaExpr(expression: Option[Seq[Node]]) = {
           processAttribute(expression.orNull)
           new AnyRef {
-            def endAttribute(): E = this_attributes
+            def endAttribute(): A = this_attributes
           }
         }
   
         def scalaExpr(expression: Seq[Node]) = {
           processAttribute(expression)
           new AnyRef {
-            def endAttribute(): E = this_attributes
+            def endAttribute(): A = this_attributes
           }
         }
   
-        def endAttribute(): E = {
+        def endAttribute(): A = {
           buf.length match { // for backward compatibility -- this switch was in parseAttribute
             case 0 => processAttribute(Nil)
             case 1 => processAttribute(buf.head)
@@ -260,31 +241,25 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
           }
           this_attributes
         }
+
+        def charData(text: String): this.type = {
+          if (text != "" ) next(new Text(text)) // for backward compatiblity -- the conditional was in makeXMLseq
+          else this
+        }
+        def entityRef(name: String): this.type = next(new EntityRef(name))
       }
     }
   }
 
-  /**
-   * This class supports productions "X" with a sequence of content
-   * (Content, Element, and Attribute), and defines the following
-   * productions common to them:
-   * 
-   * X ::= charData X
-   * X ::= entityRef X
-   */
-  abstract class BufferedUnmarshaller {
-    protected val buf= new NodeBuffer()  
+  trait BufferedUnmarshaller extends ContinuationPassingNodeFactory {
+    override type E[N]= this.type
+    override protected def next[N <: Node](newElement: N): this.type = next(newElement:Any)
 
+    protected val buf= new NodeBuffer()
     protected def next(newElement: Any): this.type = {
       buf &+ newElement
       this
     }
-
-    def charData(text: String): this.type = {
-      if (text != "" ) next(new Text(text)) // for backward compatiblity -- the conditional was in makeXMLseq
-      else this
-    }
-    def entityRef(name: String): this.type = next(new EntityRef(name))
   }
 
   /**
