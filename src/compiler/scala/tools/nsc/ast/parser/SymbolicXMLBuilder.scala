@@ -16,8 +16,7 @@ import scala.reflect.NameTransformer
 
 /** This class builds instance of `Tree` that represent XML.
  *
- *  @author  Burak Emir
- *  @version 1.0
+ *  @author  Jordi Salvat i Alabart, based on previous version from Burak Emir
  */
 abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   val global: Global
