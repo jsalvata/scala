@@ -1,4 +1,5 @@
 package scala.xml
+import scala.collection.mutable.ListBuffer
 
 /**
  * This unmarshaller supports XML literals compatible with the in-language XML
@@ -49,11 +50,6 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
    */
   def startXmlExpr()= new XmlExpr()
 
-  /**
-   * The initial symbol for the XmlPattern grammar
-   */
-  def startXmlPattern() = new ElementPattern()
- 
   /** 
    * XmlExpr := XmlContent Elements0
    */
@@ -263,19 +259,72 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
   }
 
   /**
-   * ElementPattern := 
+   * The initial symbol for the XmlPattern grammar
+   * 
+   * We're using ContentP instead of ElementPattern because it just defines more
+   * productions -- which the parser will simply not use.
    */
-  class ElementPattern {
-    def sTag(qName: String) = this
-    def eTag()= this
-    def scalaExpr(expression: Any) = this
+  def startXmlPattern() = new ContentP(null, null) {
+    def matches(nodes: Seq[Node]) = Some((Nil, nodes))
+  }
 
-    def endXmlPattern = new AnyRef {
+  abstract class ContentP(protected val parent: ContentP, protected val qName: String) {
+    outer =>
+
+    /**
+     * @returns Some((predecessor values :: parent's predecessor values, remaining nodes)) if the given sequence matches
+     * this pattern -- None otherwise.
+     */
+    def matches(nodes: Seq[Node]): Option[(Seq[Any], Seq[Node])]
+
+    def sTag(qName: String) = new ContentP(outer, qName) {
+      def matches(nodes: Seq[Node]) = Some((Nil, nodes)) 
+    }
+
+    def eTag() = new ContentP(parent.parent, parent.qName) {
+      private val (prefix, localName) = splitPrefix(outer.qName)
+      private def sameName(n: Node) = n.prefix == prefix.orNull && n.label == localName
+
+      def matches(nodes: Seq[Node]) = outer.parent.matches(nodes) match {
+        case Some((parentValues, parentNode :: parentRest)) if sameName(parentNode) => 
+          outer.matches(parentNode.child) match {
+            case Some((childValues, Nil)) => 
+              Some((
+                  parentValues ++ childValues,
+                  parentRest))
+            case _ => None
+          }
+        case _ => None
       }
-  }  
-  def unapplySeq(n: Node) = n match {
-    case _: SpecialNode | _: Group  => None
-    case _ => Some((n.prefix, n.label, n.attributes, n.scope, n.child))
+    }
+
+    def scalaPattern() = new ContentP(parent, qName) {
+      def matches(nodes: Seq[Node]) = outer.matches(nodes) match {
+          case Some((values, node :: rest)) => Some((values :+ node, rest))
+          case _ => None
+      }
+    }
+
+    def scalaStarPattern() = new ContentP(parent, qName) {
+      def matches(nodes: Seq[Node]) = outer.matches(nodes) match {
+          case Some((values, nodes)) => Some((values :+ nodes, Nil))
+          case _ => None
+      }
+    }
+
+    def charData(text: String) = new ContentP(parent, qName) {
+      override def matches(nodes: Seq[Node]) = outer.matches(nodes) match {
+        case Some((values, Text(txt) :: rest)) if txt == text => Some((values, rest))
+        case _ => None
+      }
+    }
+
+    def endXmlPattern() = new AnyRef {
+      def unapplySeq(n: Node) = outer.matches(List(n)) match {
+        case Some((values, List())) => Some(values)
+        case _ => None
+      }
+    }
   }
 
   /** Returns (Some(prefix) | None, rest) based on position of ':' */
@@ -291,5 +340,5 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
   private def qName(methodName: String, prefix: String) = methodName.split("_", 2) match {
     case Array(prefix, qName) => qName
     case _ => throw new java.lang.AssertionError(methodName+" is not a valid "+prefix+" method name.")
-  } 
+  }
 }

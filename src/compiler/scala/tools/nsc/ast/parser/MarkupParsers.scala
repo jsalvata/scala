@@ -468,7 +468,7 @@ trait MarkupParsers {
               else return false                   // terminate
               
             case '{'  => // embedded Scala patterns
-              while (ch == '{') {
+              while (ch == '{') { // This loop is a bug: https://issues.scala-lang.org/browse/SI-5154. Unfortunately removing the loop won't be enough to fix it, so not touching for the time being. 
                 nextch
                 ts ++= xScalaPatterns
               }
