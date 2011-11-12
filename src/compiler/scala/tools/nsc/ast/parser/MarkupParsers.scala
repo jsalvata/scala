@@ -434,7 +434,7 @@ trait MarkupParsers {
     def xScalaPatterns: List[ElementType] = {
       val start= curOffset;
       val patterns= escapeToScala(parser.seqPatterns(), "pattern")
-      patterns.map(handle.scalaPatterns(r2p(start, start, curOffset), _))
+      patterns.map(handle.scalaPattern(r2p(start, start, curOffset), _))
     }
 
     def reportSyntaxError(pos: Int, str: String) = parser.syntaxError(pos, str)

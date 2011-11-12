@@ -268,7 +268,7 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     def matches(nodes: Seq[Node]) = Some((Nil, nodes))
   }
 
-  abstract class ContentP(protected val parent: ContentP, protected val qName: String) {
+  abstract class ContentP(protected val parent: ContentP, protected val qName: String) extends Dynamic {
     outer =>
 
     /**
@@ -277,13 +277,18 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
      */
     def matches(nodes: Seq[Node]): Option[(Seq[Any], Seq[Node])]
 
-    def sTag(qName: String) = new ContentP(outer, qName) {
+    def applyDynamic(name: String)() = new ContentP(outer, elementQName(name)) {
       def matches(nodes: Seq[Node]) = Some((Nil, nodes)) 
     }
 
+    def startAttributes(): this.type = this
+    def endAttributes(): this.type = this
+
     def eTag() = new ContentP(parent.parent, parent.qName) {
-      private val (prefix, localName) = splitPrefix(outer.qName)
-      private def sameName(n: Node) = n.prefix == prefix.orNull && n.label == localName
+      private def sameName(n: Node) = splitPrefix(outer.qName) match {
+        case (None, localName) => n.label == localName
+        case (Some(prefix), localName) => n.prefix == prefix && n.label == localName
+      }
 
       def matches(nodes: Seq[Node]) = outer.parent.matches(nodes) match {
         case Some((parentValues, parentNode :: parentRest)) if sameName(parentNode) => 
@@ -319,7 +324,7 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
       }
     }
 
-    def endXmlPattern() = new AnyRef {
+    lazy val endXmlPattern = new AnyRef {
       def unapplySeq(n: Node) = outer.matches(List(n)) match {
         case Some((values, List())) => Some(values)
         case _ => None

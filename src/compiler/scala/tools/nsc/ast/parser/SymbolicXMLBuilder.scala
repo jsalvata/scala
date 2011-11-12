@@ -48,10 +48,11 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     val _pi:            NameType = "pi"
     val _entityRef:     NameType = "entityRef"
     val _scalaExpr:     NameType = "scalaExpr"
-    val _scalaPatterns: NameType = "scalaPatterns"
 
     val _startXmlPattern: NameType = "startXmlPattern"
     val _endXmlPattern: NameType = "endXmlPattern"
+    val _scalaPattern:  NameType = "scalaPattern"
+    val _scalaStarPattern: NameType = "scalaStarPattern"
 
     def _startAttribute(qName: String):NameType = NameTransformer.encode("startAttribute_"+qName)
     val _endAttribute:  NameType = "endAttribute"
@@ -72,9 +73,9 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   
   import xmlterms.{_None, _Some, _xml, _xmlUnmarshaller,
     _startXmlExpr, _endXmlExpr, _sTag, _eTag,
-    _charData, _comment, _cdStart, _cdEnd, _pi,
-    _entityRef, _scalaExpr, _scalaPatterns,
-    _startXmlPattern, _endXmlPattern,
+    _charData, _comment, _cdStart, _cdEnd, _pi, _entityRef,
+    _scalaExpr,
+    _startXmlPattern, _endXmlPattern, _scalaPattern, _scalaStarPattern,
     _startAttribute, _endAttribute, _startAttributes, _endAttributes}
 
   // convenience methods 
@@ -154,7 +155,7 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
       apply(pos, _sTag(qName))
   }
 
-  final def scalaPatterns(pos: Position, expr: Tree) = apply(pos, _scalaPatterns, expr)
+  final def scalaPattern(pos: Position, expr: Tree) = apply(pos, _scalaPattern, expr)
 
   final def pattern(pos: Position,
                     qName: String,
@@ -163,7 +164,20 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
     element(pos, qName, attrMap, children)
 
   final def unmarshallPattern(pos: Position, arg: Tree => Tree): Tree = {
-    Ident(_xmlUnmarshaller)
-    //apply(pos, _endXmlPattern)( arg (apply(pos, _startXmlPattern)(Ident(_xmlUnmarshaller))))
+    val pattern= arg(apply(pos, _startXmlPattern)(Ident(_xmlUnmarshaller)))
+    val (expression, patterns) = extractSubPatterns(pattern)
+    atPos(pos)(Apply(Select(expression, _endXmlPattern), patterns))
+  }
+
+  final private def extractSubPatterns(pattern: Tree): (Tree, List[Tree]) = pattern match {
+    case Apply(Select(parent, `_scalaPattern`), List(subPattern)) => {
+      val (cleanParent, subPatterns) = extractSubPatterns(parent)
+      (atPos(pattern.pos)(Apply(Select(parent, _scalaPattern), Nil)), subPatterns :+ subPattern)
+    }
+    case Apply(Select(parent, method), params) => {
+      val (cleanParent, subPatterns) = extractSubPatterns(parent)
+      (atPos(pattern.pos)(Apply(Select(cleanParent, method), params)), subPatterns)
+    }
+    case _ => (pattern, Nil)
   }
 }
