@@ -268,14 +268,8 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     def matches(nodes: Seq[Node]) = Some((Nil, nodes))
   }
 
-  abstract class ContentP(protected val parent: ContentP, protected val qName: String) extends Dynamic {
+  abstract class ContentP(val parent: ContentP, val qName: String) extends ContentPEnd(parent, qName) with Dynamic {
     outer =>
-
-    /**
-     * @returns Some((predecessor values :: parent's predecessor values, remaining nodes)) if the given sequence matches
-     * this pattern -- None otherwise.
-     */
-    def matches(nodes: Seq[Node]): Option[(Seq[Any], Seq[Node])]
 
     def applyDynamic(name: String)() = new ContentP(outer, elementQName(name)) {
       def matches(nodes: Seq[Node]) = Some((Nil, nodes)) 
@@ -284,25 +278,6 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
     def startAttributes(): this.type = this
     def endAttributes(): this.type = this
 
-    def eTag() = new ContentP(parent.parent, parent.qName) {
-      private def sameName(n: Node) = splitPrefix(outer.qName) match {
-        case (None, localName) => n.label == localName
-        case (Some(prefix), localName) => n.prefix == prefix && n.label == localName
-      }
-
-      def matches(nodes: Seq[Node]) = outer.parent.matches(nodes) match {
-        case Some((parentValues, parentNode :: parentRest)) if sameName(parentNode) => 
-          outer.matches(parentNode.child) match {
-            case Some((childValues, Nil)) => 
-              Some((
-                  parentValues ++ childValues,
-                  parentRest))
-            case _ => None
-          }
-        case _ => None
-      }
-    }
-
     def scalaPattern() = new ContentP(parent, qName) {
       def matches(nodes: Seq[Node]) = outer.matches(nodes) match {
           case Some((values, node :: rest)) => Some((values :+ node, rest))
@@ -310,7 +285,7 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
       }
     }
 
-    def scalaStarPattern() = new ContentP(parent, qName) {
+    def scalaStarPattern() = new ContentPEnd(parent, qName) {
       def matches(nodes: Seq[Node]) = outer.matches(nodes) match {
           case Some((values, nodes)) => Some((values :+ nodes, Nil))
           case _ => None
@@ -330,6 +305,35 @@ object ScalaXMLUnmarshaller extends XMLUnmarshaller {
         case _ => None
       }
     }
+  }
+
+  abstract class ContentPEnd(parent: ContentP, qName: String) {
+    outer =>
+
+    /**
+     * @returns Some((predecessor values :: parent's predecessor values, remaining nodes)) if the given sequence matches
+     * this pattern -- None otherwise.
+     */
+    def matches(nodes: Seq[Node]): Option[(Seq[Any], Seq[Node])]
+
+    def eTag() = new ContentP(parent.parent, parent.qName) {
+      private def sameName(n: Node) = splitPrefix(outer.qName) match {
+        case (None, localName) => n.label == localName
+        case (Some(prefix), localName) => n.prefix == prefix && n.label == localName
+      }
+
+      def matches(nodes: Seq[Node]) = outer.parent.matches(nodes) match {
+        case Some((parentValues, parentNode :: parentRest)) if sameName(parentNode) => 
+          outer.matches(parentNode.child) match {
+            case Some((childValues, Nil)) => 
+              Some((
+                  parentValues ++ childValues,
+                  parentRest))
+            case _ => None
+          }
+        case _ => None
+      }
+    }    
   }
 
   /** Returns (Some(prefix) | None, rest) based on position of ':' */
