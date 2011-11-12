@@ -82,7 +82,6 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   private def LL[A](x: A*): List[List[A]] = List(List(x:_*))
   private def const(x: Any) = Literal(Constant(x))
   private def wild                          = Ident(nme.WILDCARD)
-  private def wildStar                      = Ident(tpnme.WILDCARD_STAR)
   private def _scala(name: Name)            = Select(Select(Ident(nme.ROOTPKG), nme.scala_), name)
   private def _scala_xml(name: Name)        = Select(_scala(_xml), name)
 
@@ -155,7 +154,11 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
       apply(pos, _sTag(qName))
   }
 
-  final def scalaPattern(pos: Position, expr: Tree) = apply(pos, _scalaPattern, expr)
+  final def scalaPattern(pos: Position, expr: Tree) = expr match {
+    case Star(wild) => apply(pos, _scalaStarPattern, wild)
+    case Bind(varname, Star(wild)) => apply(pos, _scalaStarPattern, Bind(varname, wild))
+    case _ => apply(pos, _scalaPattern, expr)
+  }
 
   final def pattern(pos: Position,
                     qName: String,
@@ -170,9 +173,9 @@ abstract class SymbolicXMLBuilder(p: Parsers#Parser, preserveWS: Boolean) {
   }
 
   final private def extractSubPatterns(pattern: Tree): (Tree, List[Tree]) = pattern match {
-    case Apply(Select(parent, `_scalaPattern`), List(subPattern)) => {
+    case Apply(Select(parent, method @ (`_scalaPattern`|`_scalaStarPattern`)), List(subPattern)) => {
       val (cleanParent, subPatterns) = extractSubPatterns(parent)
-      (atPos(pattern.pos)(Apply(Select(parent, _scalaPattern), Nil)), subPatterns :+ subPattern)
+      (atPos(pattern.pos)(Apply(Select(cleanParent, method), Nil)), subPatterns :+ subPattern)
     }
     case Apply(Select(parent, method), params) => {
       val (cleanParent, subPatterns) = extractSubPatterns(parent)
